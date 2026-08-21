@@ -1,0 +1,13 @@
+{
+	"KPackageStructure": "Plasma/Applet",
+	"X-Plasma-API-Minimum-Version": "6.0",
+	"KPlugin": {
+		"Id": "org.kde.radialmenu",
+		"Name": "Radial Menu",
+		"Description": "Modern radial launcher for Plasma 6",
+		"Category": "Utility",
+		"Icon": "view-grid",
+		"Version": "1.0",
+		"License": "GPL-3.0"
+	}
+}
