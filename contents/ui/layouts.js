@@ -1,9 +1,9 @@
 .pragma library
 
-function getPositions(layout, n, radius, cx, cy, rotationDeg, innerRadius) {
+function getPositions(layout, n, radius, cx, cy, rotationDeg, innerRadius, itemSize) {
     if (n <= 0) return []
     switch (layout) {
-        case "semicircle": return semicircle(n, radius, cx, cy, rotationDeg || 0)
+        case "semicircle": return semicircle(n, radius, cx, cy, rotationDeg || 0, itemSize || 0)
         case "wheel":      return wheel(n, radius, innerRadius, cx, cy)
         // "radial" was this layout's old id before it was renamed to
         // "hexagonal" — old saved configs with that value fall through here.
@@ -45,11 +45,16 @@ function hexagonal(n, r, cx, cy) {
     return pos
 }
 
-function semicircle(n, r, cx, cy, rotationDeg) {
+// End items are pulled in from the flat edge by just enough angle that the
+// whole item (plus a small margin) sits inside the half-disk.
+function semicircle(n, r, cx, cy, rotationDeg, itemSize) {
     var arc = semicircleArc(rotationDeg)
+    var inset = r > 0 ? Math.asin(Math.min(1, (itemSize / 2 + 4) / r)) : 0
+    inset = Math.min(inset, Math.PI / 4)
+    var start = arc.start + inset, end = arc.end - inset
     var pos = []
     for (var i = 0; i < n; i++) {
-        var a = (n === 1) ? (arc.start + arc.end) / 2 : arc.start + (arc.end - arc.start) / (n - 1) * i
+        var a = (n === 1) ? (start + end) / 2 : start + (end - start) / (n - 1) * i
         pos.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, angle: a })
     }
     return pos

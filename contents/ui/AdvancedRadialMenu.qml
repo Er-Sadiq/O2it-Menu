@@ -90,7 +90,7 @@ Item {
     readonly property var itemPositions:
         Layouts.getPositions(menuLayout, itemCount,
             isWheel ? wheelOuterR : effectiveRadius,
-            centerX, centerY, semicircleRotation, wheelSectorInnerR)
+            centerX, centerY, semicircleRotation, wheelSectorInnerR, itemSize)
 
     // Layout mode flags
     // "radial" was this layout's old id before it was renamed to
