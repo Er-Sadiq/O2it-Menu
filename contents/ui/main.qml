@@ -28,13 +28,19 @@ PlasmoidItem {
     readonly property bool cfgShowLabels: Plasmoid.configuration.showLabels
     readonly property bool cfgShowSectorLines: Plasmoid.configuration.showSectorLines
     readonly property string cfgAccentColor: Plasmoid.configuration.accentColorCustom
-    readonly property real cfgAnimScale: Plasmoid.configuration.animationSpeed / 100.0
     readonly property string cfgPanelIcon: Plasmoid.configuration.panelIcon
     readonly property string cfgCenterIcon: Plasmoid.configuration.centerIcon
     readonly property string cfgMenuLayout: Plasmoid.configuration.menuLayout
     readonly property bool cfgRequireShortcut: Plasmoid.configuration.requireShortcut
     readonly property int cfgSemicircleRotation: Plasmoid.configuration.semicircleRotation
     readonly property int cfgCenterGap: Plasmoid.configuration.centerGap
+
+    // "Always visible" only makes sense on the desktop. In a panel, forcing
+    // the popup open made it pop up unasked, re-open the instant it was
+    // dismissed, and steal focus from the config dialog.
+    readonly property bool inPanel: Plasmoid.formFactor === PlasmaCore.Types.Horizontal
+                                 || Plasmoid.formFactor === PlasmaCore.Types.Vertical
+    readonly property bool alwaysVisible: !inPanel && !cfgRequireShortcut
 
     readonly property var cfgItems: {
         try { return JSON.parse(Plasmoid.configuration.menuItems) }
@@ -107,7 +113,6 @@ PlasmoidItem {
             accentColor: root.cfgAccentColor !== ""
                 ? root.cfgAccentColor
                 : Kirigami.Theme.highlightColor
-            animScale: root.cfgAnimScale
             centerIcon: root.cfgCenterIcon || "configure"
             menuLayout: root.cfgMenuLayout || "radial"
             semicircleRotation: root.cfgSemicircleRotation
@@ -139,8 +144,8 @@ PlasmoidItem {
                 if (child.show) { child.show(); break }
             }
         }
-        // "Always visible" mode (requireShortcut off): don't let it collapse.
-        if (!expanded && !root.cfgRequireShortcut) {
+        // "Always visible" mode (desktop, requireShortcut off): don't let it collapse.
+        if (!expanded && root.alwaysVisible) {
             root.expanded = true
         }
     }
@@ -165,6 +170,6 @@ PlasmoidItem {
     ]
 
     Component.onCompleted: {
-        if (!root.cfgRequireShortcut) root.expanded = true
+        if (root.alwaysVisible) root.expanded = true
     }
 }

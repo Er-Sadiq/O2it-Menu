@@ -30,9 +30,6 @@
     <entry name="accentColorCustom" type="String">
       <default></default>
     </entry>
-    <entry name="animationSpeed" type="Int">
-      <default>100</default>
-    </entry>
     <entry name="panelIcon" type="String">
       <default>view-grid</default>
     </entry>

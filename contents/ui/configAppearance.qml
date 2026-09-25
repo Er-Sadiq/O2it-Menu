@@ -15,7 +15,6 @@ KCM.SimpleKCM {
     property alias cfg_bgOpacity: bgOpacitySlider.value
     property alias cfg_showLabels: showLabelsCheck.checked
     property alias cfg_showSectorLines: showSectorLinesCheck.checked
-    property alias cfg_animationSpeed: animSpeedSlider.value
     property alias cfg_requireShortcut: requireShortcutCheck.checked
     property alias cfg_semicircleRotation: semicircleRotationSlider.value
     property alias cfg_centerGap: centerGapSlider.value
@@ -104,7 +103,7 @@ KCM.SimpleKCM {
             Layout.fillWidth: true
             visible: !requireShortcutCheck.checked
             type: Kirigami.MessageType.Information
-            text: i18n("Menu stays open on screen at all times instead of popping up from the panel icon.")
+            text: i18n("On the desktop the menu stays open at all times. In a panel, click the icon to open it.")
         }
 
         Item { Kirigami.FormData.isSection: true }
@@ -218,20 +217,6 @@ KCM.SimpleKCM {
             }
             QQC2.Label {
                 text: Math.round(bgOpacitySlider.value * 100) + "%"
-                Layout.minimumWidth: Kirigami.Units.gridUnit * 3
-            }
-        }
-
-        RowLayout {
-            Kirigami.FormData.label: i18n("Animation speed:")
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.Slider {
-                id: animSpeedSlider
-                from: 50; to: 200; stepSize: 10
-                Layout.fillWidth: true
-            }
-            QQC2.Label {
-                text: Math.round(animSpeedSlider.value) + "%"
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 3
             }
         }

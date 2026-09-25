@@ -21,7 +21,8 @@ Item {
     property bool showLabels: true
     property bool showSectorLines: true
     property color accentColor: Kirigami.Theme.highlightColor
-    property real animScale: 1.0
+    // Fixed timing multiplier — durations below are tuned at 1.0
+    readonly property real animScale: 1.0
     property string centerIcon: "configure"
     property string menuLayout: "hexagonal"
     property int semicircleRotation: 0
