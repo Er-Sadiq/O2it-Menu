@@ -143,6 +143,33 @@ Item {
         return itemCount > 6 ? r / 1.65 : r   // hex overflow ring sits at r * 1.65
     }
 
+    // Visible extent in local coords, including glows, brackets and the
+    // label, so the host can size its window to the content instead of the
+    // full square. Round layouts keep the square plus a 30px margin (their
+    // rotating frames use it); the semicircle only fills half the square,
+    // so it is cropped to the half-disk for its current rotation.
+    readonly property rect contentRect: {
+        if (!isSemicircle) return Qt.rect(-30, -30, menuSize + 60, menuSize + 60)
+        var k = sizeScale
+        var R = (effectiveRadius * 2 + itemSize + 30) / 2 - 8 + 20 * k
+        var arc = Layouts.semicircleArc(semicircleRotation)
+        var xs = [0], ys = [0]
+        function add(a) { xs.push(Math.cos(a) * R); ys.push(Math.sin(a) * R) }
+        add(arc.start); add(arc.end)
+        // axis extremes that fall inside the arc
+        for (var q = -4; q <= 4; q++) {
+            var a = q * Math.PI / 2
+            var d = ((a - arc.start) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)
+            if (d <= Math.PI + 1e-6) add(a)
+        }
+        var hub = hudCoreR + 12
+        xs.push(-hub, hub); ys.push(-hub, hub)
+        if (showLabels) { xs.push(-70 * k, 70 * k); ys.push(centerSize / 2 + 34 * k) }
+        var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs)
+        var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys)
+        return Qt.rect(centerX + x0, centerY + y0, x1 - x0, y1 - y0)
+    }
+
     // Hub (center circle) size never moves with centerGap — only the item
     // ring does, so the slider purely controls the gap between them.
     readonly property real effectiveRadius: Math.max(hubSize, Math.min(ringRadius + gapScaled, maxRadius))

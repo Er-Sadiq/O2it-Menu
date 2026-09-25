@@ -98,16 +98,19 @@ PlasmoidItem {
         id: menuComponent
         Item {
             id: fullRoot
-            width: root.cfgMenuSize + 60
-            height: root.cfgMenuSize + 60
-            Layout.preferredWidth: root.cfgMenuSize + 60
-            Layout.preferredHeight: root.cfgMenuSize + 60
-            Layout.minimumWidth: root.cfgMenuSize + 60
-            Layout.minimumHeight: root.cfgMenuSize + 60
+            // Sized to what the menu actually draws (semicircle only fills
+            // half its square), so the panel dialog sits right against the panel
+            width: Math.ceil(radialMenu.contentRect.width)
+            height: Math.ceil(radialMenu.contentRect.height)
+            Layout.preferredWidth: width
+            Layout.preferredHeight: height
+            Layout.minimumWidth: width
+            Layout.minimumHeight: height
 
             AdvancedRadialMenu {
                 id: radialMenu
-                anchors.centerIn: parent
+                x: -contentRect.x
+                y: -contentRect.y
 
                 menuItems: root.cfgItems
                 menuSize: root.cfgMenuSize
@@ -158,9 +161,8 @@ PlasmoidItem {
         flags: Qt.WindowStaysOnTopHint
         backgroundHints: PlasmaCore.Dialog.NoBackground
         hideOnWindowDeactivate: true
+        // Loader takes the loaded menu's size, so the dialog fits the content
         mainItem: Loader {
-            width: root.cfgMenuSize + 60
-            height: root.cfgMenuSize + 60
             active: panelMenu.visible
             sourceComponent: menuComponent
         }
