@@ -106,7 +106,11 @@ Item {
     function shade(c, f, a) {
         return Qt.rgba(Math.min(1, c.r * f), Math.min(1, c.g * f), Math.min(1, c.b * f), a)
     }
-    function withAlpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
+    // Global brightness lift for accent lines/glows and outlines: every
+    // alpha through here is scaled by `vivid` (capped at 1). Dark fills use
+    // shade() and are left alone so contrast doesn't wash out.
+    readonly property real vivid: 1.2
+    function withAlpha(c, a) { return Qt.rgba(c.r, c.g, c.b, Math.min(1, a * vivid)) }
 
     // ── Derived ─────────────────────────────────────────────
     width: menuSize; height: menuSize
@@ -343,7 +347,7 @@ Item {
                         var ctx = getContext("2d")
                         ctx.reset()
                         Layouts.hexPath(ctx, width/2, height/2, width/2 - 1)
-                        ctx.fillStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.35)
+                        ctx.fillStyle = root.withAlpha(accentColor, 0.35)
                         ctx.fill()
                     }
                     Component.onCompleted: requestPaint()
@@ -625,7 +629,7 @@ Item {
                 ctx.arc(cx, cy, outerR, startA, endA)
                 ctx.arc(cx, cy, innerR, endA, startA, true)
                 ctx.closePath()
-                ctx.strokeStyle = Qt.rgba(accent.r, accent.g, accent.b, Math.min(1, glowPass[g].a * sty.rim))
+                ctx.strokeStyle = root.withAlpha(accent, Math.min(1, glowPass[g].a * sty.rim))
                 ctx.lineWidth = glowPass[g].w
                 ctx.stroke()
             }
@@ -695,9 +699,9 @@ Item {
                     ctx.reset()
                     var cx = width / 2, cy = height / 2, r = width / 2
                     var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-                    grad.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.55))
-                    grad.addColorStop(0.45, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.2))
-                    grad.addColorStop(1, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0))
+                    grad.addColorStop(0, root.withAlpha(accentColor, 0.55))
+                    grad.addColorStop(0.45, root.withAlpha(accentColor, 0.2))
+                    grad.addColorStop(1, root.withAlpha(accentColor, 0))
                     ctx.fillStyle = grad
                     ctx.beginPath()
                     ctx.arc(cx, cy, r, 0, 2 * Math.PI)
@@ -841,8 +845,8 @@ Item {
                 var spotX = cx + Math.cos(spotA) * r * 0.55
                 var spotY = cy + Math.sin(spotA) * r * 0.55
                 var spot = ctx.createRadialGradient(spotX, spotY, 0, spotX, spotY, r * 0.6)
-                spot.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, Math.min(0.5, 0.3 * sty.glow) * op * spotT))
-                spot.addColorStop(1, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0))
+                spot.addColorStop(0, root.withAlpha(accentColor, Math.min(0.5, 0.3 * sty.glow) * op * spotT))
+                spot.addColorStop(1, root.withAlpha(accentColor, 0))
                 ctx.save()
                 ctx.beginPath()
                 ctx.moveTo(cx, cy)
@@ -864,7 +868,7 @@ Item {
             for (var g = 0; g < rimPass.length; g++) {
                 ctx.beginPath()
                 ctx.arc(cx, cy, r - 1, arc.start, arc.end)
-                ctx.strokeStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, Math.min(1, rimPass[g].a * sty.rim * 1.6) * op)
+                ctx.strokeStyle = root.withAlpha(accentColor, Math.min(1, rimPass[g].a * sty.rim * 1.6) * op)
                 ctx.lineWidth = rimPass[g].w
                 ctx.stroke()
             }
@@ -920,9 +924,9 @@ Item {
                         ctx.reset()
                         var cx = width / 2, cy = height / 2, r = width / 2
                         var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-                        grad.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.5))
-                        grad.addColorStop(0.5, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.18))
-                        grad.addColorStop(1, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0))
+                        grad.addColorStop(0, root.withAlpha(accentColor, 0.5))
+                        grad.addColorStop(0.5, root.withAlpha(accentColor, 0.18))
+                        grad.addColorStop(1, root.withAlpha(accentColor, 0))
                         ctx.fillStyle = grad
                         ctx.beginPath()
                         ctx.arc(cx, cy, r, 0, 2 * Math.PI)
@@ -937,13 +941,13 @@ Item {
                         GradientStop {
                             position: 0.0
                             color: circItem.isSel
-                                ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.32 * root.bgOpacity)
+                                ? root.withAlpha(accentColor, 0.32 * root.bgOpacity)
                                 : root.shade(Kirigami.Theme.backgroundColor, root.st.body * (1 + 0.2 * root.st.depth), 0.45 * root.bgOpacity)
                         }
                         GradientStop {
                             position: 1.0
                             color: circItem.isSel
-                                ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.16 * root.bgOpacity)
+                                ? root.withAlpha(accentColor, 0.16 * root.bgOpacity)
                                 : root.shade(Kirigami.Theme.backgroundColor, root.st.body * (1 - 0.2 * root.st.depth), 0.4 * root.bgOpacity)
                         }
                     }
