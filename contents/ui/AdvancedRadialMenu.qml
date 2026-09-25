@@ -12,6 +12,59 @@ Item {
     signal closeRequested()
     signal openSettings()
 
+    // Targeting brackets shown on the hovered item (HUD look). sides: 0 =
+    // four short arcs around a round item, 6 = corner brackets on a hex.
+    component TargetBrackets: Canvas {
+        id: tb
+        property bool active: false
+        property bool spin: false
+        property color color: "white"
+        property int sides: 0
+        property real animScale: 1
+        opacity: active ? 1 : 0
+        visible: opacity > 0
+        scale: active ? 1 : 1.3
+        Behavior on opacity { NumberAnimation { duration: 140 * tb.animScale } }
+        Behavior on scale { NumberAnimation { duration: 180 * tb.animScale; easing.type: Easing.OutCubic } }
+        onVisibleChanged: if (visible) requestPaint()
+        onColorChanged: requestPaint()
+        Component.onCompleted: requestPaint()
+        RotationAnimation on rotation {
+            running: tb.active && tb.spin; loops: Animation.Infinite
+            from: 0; to: 360; duration: 4000
+        }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var cx = width / 2, cy = height / 2, r = width / 2 - 2
+            ctx.strokeStyle = Qt.rgba(color.r, color.g, color.b, 0.95)
+            ctx.lineWidth = 2
+            if (sides === 0) {
+                for (var q = 0; q < 4; q++) {
+                    var a0 = q * Math.PI / 2 - Math.PI / 4 - 0.3
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, r, a0, a0 + 0.6)
+                    ctx.stroke()
+                }
+                return
+            }
+            // Pointy-top polygon; each bracket runs 30% down both edges of a corner
+            var pts = []
+            for (var i = 0; i < sides; i++) {
+                var a = 2 * Math.PI / sides * i - Math.PI / 2
+                pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r })
+            }
+            for (var v = 0; v < sides; v++) {
+                var p = pts[v], prev = pts[(v + sides - 1) % sides], next = pts[(v + 1) % sides]
+                ctx.beginPath()
+                ctx.moveTo(p.x + (prev.x - p.x) * 0.3, p.y + (prev.y - p.y) * 0.3)
+                ctx.lineTo(p.x, p.y)
+                ctx.lineTo(p.x + (next.x - p.x) * 0.3, p.y + (next.y - p.y) * 0.3)
+                ctx.stroke()
+            }
+        }
+    }
+
     // ── Config ──────────────────────────────────────────────
     property var menuItems: []
     property int menuSize: 400
@@ -83,7 +136,10 @@ Item {
             var h = half - itemSize / 2 - 6
             return itemCount > 8 ? h / 1.5 : h   // HUD overflow ring sits at r * 1.5
         }
-        var r = half - itemSize / 2 - 6
+        // Leave room for the rotating hex frame (ticks + bands, 27px at 400)
+        // around the items; its corners may use the popup's 30px margin.
+        var r = Math.min(half - itemSize / 2 - 6,
+                         (half + 26) * 0.866 - 31 * sizeScale - itemSize / 2)
         return itemCount > 6 ? r / 1.65 : r   // hex overflow ring sits at r * 1.65
     }
 
@@ -104,6 +160,8 @@ Item {
     readonly property bool isWheel: menuLayout === "wheel"
     readonly property bool isSemicircle: menuLayout === "semicircle"
     readonly property bool isHud: menuLayout === "hud"
+    // Layouts sharing the HUD look: reactor core, compass, brackets, readout label
+    readonly property bool hudLook: isHud || isHexagonal || isSemicircle
 
     // Wheel geometry — wheelInnerR is the hub/hole, fixed regardless of
     // centerGap. The pie sectors actually start at wheelSectorInnerR, which
@@ -330,6 +388,12 @@ Item {
                                                   idleEdge.a + (selEdge.a - idleEdge.a) * selT)
                         ctx.lineWidth = 1.5 + 0.5 * selT
                         ctx.stroke()
+
+                        // Inner outline — HUD double edge
+                        Layouts.hexPath(ctx, cx, cy, r - 4 * root.sizeScale)
+                        ctx.strokeStyle = root.withAlpha(accentColor, (0.2 + 0.2 * sty.idleGlow + 0.3 * selT) * op)
+                        ctx.lineWidth = 1
+                        ctx.stroke()
                     }
                 }
 
@@ -340,94 +404,16 @@ Item {
                     color: hexItem.isSel ? accentColor : Kirigami.Theme.textColor
                     Behavior on color { ColorAnimation { duration: 120 * animScale } }
                 }
-            }
-        }
-    }
 
-    // Glowing center ring (inspired by image 1)
-    Item {
-        id: hexCenter
-        visible: isHexagonal
-        anchors.centerIn: parent
-        width: root.hubSize; height: root.hubSize
-        transform: Scale { origin.x: hexCenter.width / 2; origin.y: hexCenter.height / 2; xScale: root.centerFxScale; yScale: xScale }
-
-        // Outer glow ring
-        Canvas {
-            id: glowRingCanvas
-            anchors.centerIn: parent
-            width: parent.width + 12; height: width
-            property bool hov: root.centerHovered
-            property real op: root.bgOpacity
-            property var sty: root.st
-            onHovChanged: requestPaint()
-            onOpChanged: requestPaint()
-            onStyChanged: requestPaint()
-            Component.onCompleted: requestPaint()
-
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                var cx = width/2, cy = height/2
-                var outerR = width/2 - 6
-                var innerR = outerR * 0.62
-
-                // Dark glass disc inside the ring so the icon reads on any wallpaper
-                if (sty.depth > 0) {
-                    var disc = ctx.createLinearGradient(0, cy - innerR, 0, cy + innerR)
-                    disc.addColorStop(0, root.shade(Kirigami.Theme.backgroundColor, 1.1, 0.7 * op * sty.depth))
-                    disc.addColorStop(1, root.shade(Kirigami.Theme.backgroundColor, 0.6, 0.7 * op * sty.depth))
-                    ctx.beginPath()
-                    ctx.arc(cx, cy, innerR, 0, 2 * Math.PI)
-                    ctx.fillStyle = disc
-                    ctx.fill()
+                TargetBrackets {
+                    anchors.centerIn: parent
+                    width: parent.width + 14 * root.sizeScale; height: width
+                    sides: 6
+                    active: hexItem.isSel
+                    color: accentColor
+                    animScale: root.animScale
                 }
-
-                // Neon: soft outer halo passes around the ring
-                if (sty.idleGlow > 0) {
-                    var halo = [{ w: 8, a: 0.1 }, { w: 4, a: 0.2 }]
-                    for (var h = 0; h < halo.length; h++) {
-                        ctx.beginPath()
-                        ctx.arc(cx, cy, outerR, 0, 2 * Math.PI)
-                        ctx.strokeStyle = root.withAlpha(accentColor, halo[h].a * op)
-                        ctx.lineWidth = halo[h].w
-                        ctx.stroke()
-                    }
-                }
-
-                // Ring shape
-                ctx.beginPath()
-                ctx.arc(cx, cy, outerR, 0, 2 * Math.PI)
-                ctx.arc(cx, cy, innerR, 2 * Math.PI, 0, true)
-                ctx.closePath()
-
-                var alpha = Math.min(1, (hov ? 0.8 : 0.5) * (0.5 + 0.5 * sty.rim)) * op
-                ctx.fillStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, alpha)
-                ctx.fill()
-
-                // Inner bright edge
-                ctx.beginPath()
-                ctx.arc(cx, cy, innerR + 1, 0, 2 * Math.PI)
-                ctx.strokeStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, (hov ? 0.9 : 0.6) * op)
-                ctx.lineWidth = 1.5
-                ctx.stroke()
             }
-
-            // Pulsing animation — only spend cycles on this while it's actually shown
-            SequentialAnimation on opacity {
-                running: isHexagonal && root.st.pulseMin < 1
-                loops: Animation.Infinite
-                onStopped: glowRingCanvas.opacity = 1
-                NumberAnimation { to: 1.0; duration: 1800 * animScale; easing.type: Easing.InOutSine }
-                NumberAnimation { to: root.st.pulseMin; duration: 1800 * animScale; easing.type: Easing.InOutSine }
-            }
-        }
-
-        Kirigami.Icon {
-            anchors.centerIn: parent
-            source: root.centerIcon
-            width: root.hubIconSize; height: width
-            color: Kirigami.Theme.textColor
         }
     }
 
@@ -939,6 +925,15 @@ Item {
                         : root.st.idleGlow > 0 ? root.withAlpha(accentColor, 0.85 * root.bgOpacity)
                         : root.withAlpha(Kirigami.Theme.textColor, root.st.edge * root.bgOpacity)
 
+                    // Inner ring — HUD double edge
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: Math.round(4 * root.sizeScale)
+                        radius: width / 2
+                        color: "transparent"
+                        border.width: 1
+                        border.color: root.withAlpha(accentColor, (0.2 + 0.2 * root.st.idleGlow + (circItem.isSel ? 0.3 : 0)) * root.bgOpacity)
+                    }
+
                     // Glossy sheen over the top half
                     Rectangle {
                         visible: root.st.sheen > 0
@@ -956,81 +951,53 @@ Item {
                         color: circItem.isSel ? accentColor : Kirigami.Theme.textColor
                         Behavior on color { ColorAnimation { duration: 120 * animScale } }
                     }
+
+                    TargetBrackets {
+                        anchors.centerIn: parent
+                        width: parent.width + 16 * root.sizeScale; height: width
+                        active: circItem.isSel
+                        spin: root.hudSpin
+                        color: accentColor
+                        animScale: root.animScale
+                    }
                 }
             }
         }
     }
 
-    // Soft ambient glow behind the semicircle center button — brightens on
-    // hover, but no scale (the hover-magnify effect was intentionally
-    // removed from every layout's settings/center button)
-    Canvas {
-        id: centerGlow
-        visible: isSemicircle
-        anchors.centerIn: parent
-        width: centerSize * 2; height: width
-        property bool hov: root.centerHovered
-        property real op: root.bgOpacity
-        onHovChanged: requestPaint()
-        onOpChanged: requestPaint()
-        opacity: Math.min(1, (hov ? 1.0 : 0.55) * (0.3 + 0.5 * root.st.glow))
-        Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
-        Component.onCompleted: requestPaint()
-        onPaint: {
-            var ctx = getContext("2d")
-            ctx.reset()
-            var cx = width / 2, cy = height / 2, r = width / 2
-            var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-            grad.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.35 * op))
-            grad.addColorStop(0.55, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.12 * op))
-            grad.addColorStop(1, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0))
-            ctx.fillStyle = grad
-            ctx.beginPath()
-            ctx.arc(cx, cy, r, 0, 2 * Math.PI)
-            ctx.fill()
-        }
-    }
-
-    // Center button (semicircle only — hexagonal uses the glowing ring
-    // center above; wheel has its own dark hub)
-    Rectangle {
-        id: semiHub
-        visible: isSemicircle
-        anchors.centerIn: parent
-        width: root.hubSize; height: root.hubSize; radius: width / 2
-        transform: Scale { origin.x: semiHub.width / 2; origin.y: semiHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
-        color: centerHovered ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.18 * bgOpacity) : Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.95 * bgOpacity)
-        border.width: 2
-        border.color: centerHovered ? accentColor : root.withAlpha(accentColor, Math.min(1, 0.5 * (0.5 + 0.5 * root.st.rim) + root.st.idleGlow) * bgOpacity)
-        Behavior on color { ColorAnimation { duration: 150 * animScale } }
-        Kirigami.Icon {
-            anchors.centerIn: parent; source: root.centerIcon
-            width: Math.round(root.hubIconSize * 0.9); height: width
-            color: centerHovered ? accentColor : Kirigami.Theme.textColor
-            Behavior on color { ColorAnimation { duration: 120 * animScale } }
-        }
-    }
-
     // =====================================================================
     //  HUD LAYOUT — Iron Man / JARVIS style: arc-reactor core, rotating
-    //  compass + segment rings, circular HUD buttons
+    //  compass + segment rings, circular HUD buttons.
+    //  Core, compass and brackets are shared with hexagonal + semicircle
+    //  (hudLook); the backdrop bands with hexagonal.
     // =====================================================================
 
-    readonly property real hudCoreR: Math.max(hubSize, effectiveRadius - itemSize / 2 - 8 * sizeScale)
-    readonly property real hudOrbR: hudCoreR * 0.42
+    // Semicircle keeps a small core on its flat edge; the round layouts fill
+    // the space inside the item ring
+    readonly property real hudCoreR: isSemicircle ? Math.round(46 * sizeScale)
+        : Math.max(hubSize, effectiveRadius - itemSize / 2 - (isHud ? 8 : 16) * sizeScale)
+    readonly property real hudOrbR: hudCoreR * (isSemicircle ? 0.55 : 0.42)
     // Ring spin is decorative — off in Minimal, and only while shown
-    readonly property bool hudSpin: isHud && st.pulseMin < 1
+    readonly property bool hudSpin: hudLook && st.pulseMin < 1
+    // Hexagonal's rotating frame: inradius just outside the outermost items,
+    // so the flat sides clear every item at any rotation
+    readonly property real hexFrameIn: effectiveRadius * (itemCount > 6 ? 1.65 : 1) + itemSize / 2 + 4 * sizeScale
 
     // Backdrop: thick translucent arc bands + thin frame circle, slow spin.
     // Pure Item rotation, so spinning never repaints the canvas.
     Canvas {
         id: hudBackdrop
-        visible: isHud
+        visible: isHud || isHexagonal
+        z: -1
         anchors.centerIn: parent
-        width: root.menuSize; height: width
+        width: root.menuSize + (isHexagonal ? 60 : 0); height: width
         property var sty: root.st
         property real op: root.bgOpacity
         property color accent: accentColor
+        property real frame: root.hexFrameIn
+        property bool hex: isHexagonal
+        onFrameChanged: requestPaint()
+        onHexChanged: requestPaint()
         onStyChanged: requestPaint()
         onOpChanged: requestPaint()
         onAccentChanged: requestPaint()
@@ -1044,6 +1011,29 @@ Item {
             var ctx = getContext("2d")
             ctx.reset()
             var cx = width / 2, cy = height / 2
+            var fillA = (0.08 + 0.1 * sty.idleGlow + 0.04 * sty.depth) * op
+            var edgeA = (0.18 + 0.2 * sty.idleGlow) * op
+
+            // Hexagonal: same uneven bands, but on a hex ring outside the ticks
+            if (hex) {
+                var k = root.sizeScale, toC = 1 / 0.866
+                var cIn = (frame + 13 * k) * toC, cOut = (frame + 27 * k) * toC
+                // [t0, t1] in perimeter units (1 = one edge)
+                var hb = [[0.2, 1.3], [1.8, 2.4], [2.9, 4.2], [4.7, 5.1], [5.4, 5.9]]
+                for (var h = 0; h < hb.length; h++) {
+                    Layouts.hexBandPath(ctx, cx, cy, cIn, cOut, hb[h][0], hb[h][1])
+                    ctx.fillStyle = root.withAlpha(accent, fillA)
+                    ctx.fill()
+                    ctx.strokeStyle = root.withAlpha(accent, edgeA)
+                    ctx.lineWidth = 1
+                    ctx.stroke()
+                }
+                Layouts.hexPath(ctx, cx, cy, (frame + 10 * k) * toC)
+                ctx.strokeStyle = root.withAlpha(accent, (0.2 + 0.2 * sty.idleGlow) * op)
+                ctx.stroke()
+                return
+            }
+
             var R = width / 2 - 4
             var band = 14 * root.sizeScale
             var d2r = Math.PI / 180
@@ -1073,21 +1063,30 @@ Item {
     // Counter-rotates slower than the backdrop.
     Canvas {
         id: hudCompass
-        visible: isHud
+        visible: hudLook
+        z: -1
         anchors.centerIn: parent
-        width: root.menuSize + 40; height: width
+        width: root.menuSize + 60; height: width
         property var sty: root.st
         property real op: root.bgOpacity
         // Outermost button orbit, so the compass never runs under buttons
-        property real orbit: root.effectiveRadius * (root.itemCount > 8 ? 1.5 : 1)
+        property real orbit: root.effectiveRadius
+            * (isHud && root.itemCount > 8 ? 1.5 : isHexagonal && root.itemCount > 6 ? 1.65 : 1)
+        property string lay: root.menuLayout
+        property real rot: root.semicircleRotation
+        property real frame: root.hexFrameIn
+        onFrameChanged: requestPaint()
+        onLayChanged: requestPaint()
+        onRotChanged: requestPaint()
         property color accent: accentColor
         onStyChanged: requestPaint()
         onOpChanged: requestPaint()
         onOrbitChanged: requestPaint()
         onAccentChanged: requestPaint()
         Component.onCompleted: requestPaint()
+        // Semicircle's ticks must stay on its arc, so it never spins
         RotationAnimation on rotation {
-            running: root.hudSpin; loops: Animation.Infinite
+            running: root.hudSpin && !isSemicircle; loops: Animation.Infinite
             from: 360; to: 0; duration: 140000
             onStopped: hudCompass.rotation = 0
         }
@@ -1099,7 +1098,52 @@ Item {
             var r0 = orbit + root.itemSize / 2 + 4 * k
             var a = Math.min(1, 0.55 + 0.3 * sty.idleGlow) * op
 
+            // Hexagonal: ticks perpendicular to each side of a hex frame,
+            // markers pointing in from the six corners
+            if (root.isHexagonal) {
+                var toC = 1 / 0.866, C = frame * toC
+                for (var ht = 0; ht < 72; ht++) {
+                    var tt = ht / 12
+                    var p0 = Layouts.hexPoint(cx, cy, C, tt)
+                    var edge = Math.floor(tt) % 6
+                    var na = Math.PI / 3 * edge - Math.PI / 3       // outward normal of this edge
+                    var hmaj = ht % 6 === 0
+                    var hl = (hmaj ? 9 : 4) * k
+                    ctx.beginPath()
+                    ctx.moveTo(p0.x, p0.y)
+                    ctx.lineTo(p0.x + Math.cos(na) * hl, p0.y + Math.sin(na) * hl)
+                    ctx.strokeStyle = root.withAlpha(accent, (hmaj ? 0.8 : 0.4) * a)
+                    ctx.lineWidth = hmaj ? 1.5 : 1
+                    ctx.stroke()
+                }
+                Layouts.hexPath(ctx, cx, cy, C)
+                ctx.strokeStyle = root.withAlpha(accent, 0.3 * a)
+                ctx.lineWidth = 1
+                ctx.stroke()
+                for (var hv = 0; hv < 6; hv++) {
+                    var va = Math.PI / 3 * hv - Math.PI / 2
+                    var vt = C - 1 * k, vb = C + 9 * k, vw = 0.035
+                    ctx.beginPath()
+                    ctx.moveTo(cx + Math.cos(va) * vt, cy + Math.sin(va) * vt)
+                    ctx.lineTo(cx + Math.cos(va - vw) * vb, cy + Math.sin(va - vw) * vb)
+                    ctx.lineTo(cx + Math.cos(va + vw) * vb, cy + Math.sin(va + vw) * vb)
+                    ctx.closePath()
+                    ctx.fillStyle = root.withAlpha(accent, 0.85 * a)
+                    ctx.fill()
+                }
+                return
+            }
+
+            var arc = root.isSemicircle ? Layouts.semicircleArc(rot) : null
+            function inArc(ang) {
+                if (!arc) return true
+                var d = ((ang - arc.start) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)
+                return d <= arc.end - arc.start + 1e-6
+            }
+
             // Orbit line through the item centers + dashed inner guide
+            // (semicircle already has its own track band)
+            if (!arc) {
             ctx.beginPath()
             ctx.arc(cx, cy, orbit, 0, 2 * Math.PI)
             ctx.strokeStyle = root.withAlpha(accent, 0.45 * a)
@@ -1112,10 +1156,12 @@ Item {
                 ctx.strokeStyle = root.withAlpha(accent, 0.35 * a)
                 ctx.stroke()
             }
+            }
 
             // Ticks every 5°, long every 30°
             for (var t = 0; t < 72; t++) {
                 var ang = t * Math.PI / 36
+                if (!inArc(ang)) continue
                 var major = t % 6 === 0
                 var len = (major ? 9 : 4) * k
                 ctx.beginPath()
@@ -1126,7 +1172,8 @@ Item {
                 ctx.stroke()
             }
 
-            // Cardinal letters + inward-pointing markers
+            // Cardinal letters + inward-pointing markers (full circles only)
+            if (arc) return
             var letters = ["N", "E", "S", "W"]
             ctx.font = "bold " + Math.round(10 * k) + "px sans-serif"
             ctx.textAlign = "center"
@@ -1153,7 +1200,7 @@ Item {
     // Arc-reactor core: dark disc, segment-block ring, rim, hex-patterned orb
     Item {
         id: hudCore
-        visible: isHud
+        visible: hudLook
         anchors.centerIn: parent
         width: root.hudCoreR * 2 + 24; height: width
 
@@ -1389,35 +1436,13 @@ Item {
                     }
                 }
 
-                // Targeting brackets — four short arcs that lock on and spin
-                Canvas {
-                    id: hudBrackets
+                TargetBrackets {
                     anchors.centerIn: parent
                     width: parent.width + 16 * root.sizeScale; height: width
-                    opacity: hudItem.isSel ? 1 : 0
-                    visible: opacity > 0
-                    scale: hudItem.isSel ? 1 : 1.3
-                    Behavior on opacity { NumberAnimation { duration: 140 * animScale } }
-                    Behavior on scale { NumberAnimation { duration: 180 * animScale; easing.type: Easing.OutCubic } }
-                    onVisibleChanged: if (visible) requestPaint()
-                    Component.onCompleted: requestPaint()
-                    RotationAnimation on rotation {
-                        running: hudItem.isSel && root.hudSpin; loops: Animation.Infinite
-                        from: 0; to: 360; duration: 4000
-                    }
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.reset()
-                        var cx = width / 2, cy = height / 2, r = width / 2 - 2
-                        for (var q = 0; q < 4; q++) {
-                            var a0 = q * Math.PI / 2 - Math.PI / 4 - 0.3
-                            ctx.beginPath()
-                            ctx.arc(cx, cy, r, a0, a0 + 0.6)
-                            ctx.strokeStyle = root.withAlpha(accentColor, 0.95)
-                            ctx.lineWidth = 2
-                            ctx.stroke()
-                        }
-                    }
+                    active: hudItem.isSel
+                    spin: root.hudSpin
+                    color: accentColor
+                    animScale: root.animScale
                 }
             }
         }
@@ -1430,10 +1455,12 @@ Item {
         visible: showLabels
         anchors.horizontalCenter: parent.horizontalCenter
         // HUD: uppercase accent readout tucked under the orb
-        y: isHud ? centerY + hudOrbR + 4 * sizeScale : centerY + centerSize / 2 + 12 * sizeScale
-        text: isHud ? activeLabel.toUpperCase() : activeLabel
-        font.weight: Font.Bold; font.pointSize: isHud ? 9 : 11; font.letterSpacing: isHud ? 2 : 0.5
-        color: isHud ? accentColor : Kirigami.Theme.textColor
+        // HUD look: uppercase accent readout — under the orb inside the
+        // core on round layouts, below the flat edge on semicircle
+        y: (isHud || isHexagonal) ? centerY + hudOrbR + 4 * sizeScale : centerY + centerSize / 2 + 12 * sizeScale
+        text: hudLook ? activeLabel.toUpperCase() : activeLabel
+        font.weight: Font.Bold; font.pointSize: hudLook ? 9 : 11; font.letterSpacing: hudLook ? 2 : 0.5
+        color: hudLook ? accentColor : Kirigami.Theme.textColor
         opacity: activeLabel !== "" ? 1.0 : 0.0
         scale: activeLabel !== "" ? 1.0 : 0.85
         Behavior on opacity { NumberAnimation { duration: 100 * animScale } }
@@ -1476,7 +1503,7 @@ Item {
             var dx = mouse.x - centerX, dy = mouse.y - centerY
             var dist = Math.sqrt(dx * dx + dy * dy)
 
-            var centerR = isWheel ? wheelInnerR - 4 : isHud ? hudOrbR : centerSize / 2
+            var centerR = isWheel ? wheelInnerR - 4 : hudLook ? Math.max(hudOrbR, centerSize / 2) : centerSize / 2
             if (dist < centerR) {
                 centerHovered = true; selectedIndex = -1; activeLabel = "Settings"
             } else if (isWheel && dist < wheelSectorInnerR) {

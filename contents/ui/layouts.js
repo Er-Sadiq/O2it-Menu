@@ -101,6 +101,35 @@ function hasDividers(layout) {
     return false  // dividers drawn via Canvas per layout
 }
 
+// Point on a pointy-top hexagon's perimeter. t runs 0…6 around the edges
+// (integer t = vertex t, vertex 0 at the top); C is the circumradius.
+function hexPoint(cx, cy, C, t) {
+    var i = Math.floor(t) % 6, f = t - Math.floor(t)
+    var a0 = Math.PI / 3 * i - Math.PI / 2, a1 = a0 + Math.PI / 3
+    return {
+        x: cx + C * (Math.cos(a0) + (Math.cos(a1) - Math.cos(a0)) * f),
+        y: cy + C * (Math.sin(a0) + (Math.sin(a1) - Math.sin(a0)) * f)
+    }
+}
+
+// Closed path for a hex-ring band from t0 to t1 (t0 < t1, perimeter units),
+// between circumradii cIn and cOut — the hexagonal version of an arc band.
+function hexBandPath(ctx, cx, cy, cIn, cOut, t0, t1) {
+    var ts = [t0]
+    for (var v = Math.floor(t0) + 1; v < t1; v++) ts.push(v)
+    ts.push(t1)
+    ctx.beginPath()
+    for (var i = 0; i < ts.length; i++) {
+        var p = hexPoint(cx, cy, cOut, ts[i])
+        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y)
+    }
+    for (var j = ts.length - 1; j >= 0; j--) {
+        var q = hexPoint(cx, cy, cIn, ts[j])
+        ctx.lineTo(q.x, q.y)
+    }
+    ctx.closePath()
+}
+
 // Draw a pointy-top hexagon path on a Canvas context
 function hexPath(ctx, cx, cy, r) {
     ctx.beginPath()
