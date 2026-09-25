@@ -66,10 +66,46 @@ Item {
     property string activeLabel: ""
     property bool centerHovered: false
 
+    // Last non-negative selectedIndex — lets the wheel highlight / semicircle
+    // spotlight fade out in place instead of snapping back to index 0.
+    property int lastSelected: 0
+    onSelectedIndexChanged: if (selectedIndex >= 0) lastSelected = selectedIndex
+
+    // Press / launch feedback
+    property int pressedIndex: -1
+    property bool pressedCenter: false
+    property bool pressing: false
+    property real pressT: pressing ? 1 : 0
+    Behavior on pressT { NumberAnimation { duration: 90 * animScale; easing.type: Easing.OutCubic } }
+    property int launchIndex: -1
+    property real popT: 0
+    readonly property bool launching: launchIndex >= 0
+
     function show() {
+        launchAnim.stop()
         selectedIndex = -1; activeLabel = ""; centerHovered = false
+        pressedIndex = -1; pressedCenter = false; pressing = false
+        launchIndex = -1; popT = 0
         openAnim.restart()
     }
+
+    function startLaunch(idx) {
+        launchIndex = idx
+        launchAnim.restart()
+    }
+
+    // Extra scale layered on top of entrance + magnify: press shrink, launch pop
+    function fxScale(idx) {
+        var s = 1.0
+        if (idx === pressedIndex) s *= 1 - 0.1 * pressT
+        if (idx === launchIndex) s *= 1 + 0.15 * popT
+        return s
+    }
+    // Non-launched items dim while the launched one pops
+    function fxOpacity(idx) {
+        return (launching && idx !== launchIndex) ? 1 - 0.6 * popT : 1.0
+    }
+    readonly property real centerFxScale: pressedCenter ? 1 - 0.1 * pressT : 1.0
     function hide() { closeAnim.restart() }
 
     // Dock-style magnification: hovered item pops big, ring-neighbors pop less
@@ -106,6 +142,16 @@ Item {
         }
         ScriptAction { script: root.closeRequested() }
     }
+    SequentialAnimation {
+        id: launchAnim
+        NumberAnimation { target: root; property: "popT"; from: 0; to: 1; duration: 180 * animScale; easing.type: Easing.OutCubic }
+        ScriptAction {
+            script: {
+                var item = menuItems[root.launchIndex]
+                if (item) root.launchApp(item.desktop)
+            }
+        }
+    }
 
     // =====================================================================
     //  HEXAGONAL LAYOUT — Floating hex icons + glow ring center
@@ -124,6 +170,7 @@ Item {
             readonly property var pos: index < itemPositions.length ? itemPositions[index] : null
             x: pos ? pos.x - width / 2 : 0
             y: pos ? pos.y - height / 2 : 0
+            transform: Scale { origin.x: hexItem.width / 2; origin.y: hexItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.3
             Component.onCompleted: hexEnter.start()
@@ -141,6 +188,7 @@ Item {
                 id: hexHoverScale
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
+                opacity: root.fxOpacity(index)
                 Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
                 // Hex glow behind (on hover, falls off across neighbors)
@@ -167,11 +215,19 @@ Item {
                 Canvas {
                     id: hexCanvas
                     anchors.fill: parent
-                    property bool sel: hexItem.isSel
+                    // 0 → 1 blend between idle and selected look, animated so
+                    // fill/border cross-fade instead of snapping
+                    property real selT: hexItem.isSel ? 1 : 0
+                    Behavior on selT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
                     property real op: root.bgOpacity
-                    onSelChanged: requestPaint()
+                    onSelTChanged: requestPaint()
                     onOpChanged: requestPaint()
                     Component.onCompleted: requestPaint()
+
+                    function mix(c1, a1, c2, a2, t) {
+                        return Qt.rgba(c1.r + (c2.r - c1.r) * t, c1.g + (c2.g - c1.g) * t,
+                                       c1.b + (c2.b - c1.b) * t, (a1 + (a2 - a1) * t) * root.bgOpacity)
+                    }
 
                     onPaint: {
                         var ctx = getContext("2d")
@@ -179,20 +235,11 @@ Item {
                         var r = Math.min(width, height) / 2 - 2
                         Layouts.hexPath(ctx, width/2, height/2, r)
 
-                        if (sel) {
-                            ctx.fillStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.4 * root.bgOpacity)
-                        } else {
-                            ctx.fillStyle = Qt.rgba(
-                                Kirigami.Theme.backgroundColor.r,
-                                Kirigami.Theme.backgroundColor.g,
-                                Kirigami.Theme.backgroundColor.b, 0.55 * root.bgOpacity)
-                        }
+                        ctx.fillStyle = mix(Kirigami.Theme.backgroundColor, 0.55, accentColor, 0.4, selT)
                         ctx.fill()
 
-                        ctx.strokeStyle = sel
-                            ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.85 * root.bgOpacity)
-                            : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.55 * root.bgOpacity)
-                        ctx.lineWidth = sel ? 2 : 1.5
+                        ctx.strokeStyle = mix(Kirigami.Theme.textColor, 0.55, accentColor, 0.85, selT)
+                        ctx.lineWidth = 1.5 + 0.5 * selT
                         ctx.stroke()
                     }
                 }
@@ -210,9 +257,11 @@ Item {
 
     // Glowing center ring (inspired by image 1)
     Item {
+        id: hexCenter
         visible: isHexagonal
         anchors.centerIn: parent
         width: 40; height: 40
+        transform: Scale { origin.x: hexCenter.width / 2; origin.y: hexCenter.height / 2; xScale: root.centerFxScale; yScale: xScale }
 
         // Outer glow ring
         Canvas {
@@ -279,11 +328,11 @@ Item {
         anchors.centerIn: parent
         width: (wheelOuterR + 10) * 2; height: width
 
-        property int sel: root.selectedIndex
+        // Selection is drawn by wheelHighlight below, so hovering never
+        // repaints this (larger) canvas
         property bool divLines: root.showSectorLines
         property real op: root.bgOpacity
         property real gap: root.centerGap
-        onSelChanged: requestPaint()
         onDivLinesChanged: requestPaint()
         onOpChanged: requestPaint()
         onGapChanged: requestPaint()
@@ -315,20 +364,11 @@ Item {
                 ctx.arc(cx, cy, innerR, endA, startA, true)
                 ctx.closePath()
 
-                // Fill: highlighted (neon-tinted) or base
-                if (sel === i) {
-                    ctx.fillStyle = Qt.rgba(
-                        Kirigami.Theme.backgroundColor.r * 1.3 + accentColor.r * 0.22,
-                        Kirigami.Theme.backgroundColor.g * 1.3 + accentColor.g * 0.22,
-                        Kirigami.Theme.backgroundColor.b * 1.3 + accentColor.b * 0.22,
-                        root.bgOpacity)
-                } else {
-                    ctx.fillStyle = Qt.rgba(
-                        Kirigami.Theme.backgroundColor.r * 0.7,
-                        Kirigami.Theme.backgroundColor.g * 0.7,
-                        Kirigami.Theme.backgroundColor.b * 0.7,
-                        root.bgOpacity)
-                }
+                ctx.fillStyle = Qt.rgba(
+                    Kirigami.Theme.backgroundColor.r * 0.7,
+                    Kirigami.Theme.backgroundColor.g * 0.7,
+                    Kirigami.Theme.backgroundColor.b * 0.7,
+                    root.bgOpacity)
                 ctx.fill()
 
                 // Sector border (divider lines)
@@ -350,35 +390,86 @@ Item {
             ctx.beginPath()
             ctx.arc(cx, cy, innerR, 0, 2 * Math.PI)
             ctx.stroke()
+        }
+    }
 
-            // Neon edge glow on selected sector — layered strokes fake a soft blur
-            if (sel >= 0 && sel < n) {
-                var gStartA = slice * sel - Math.PI / 2 - slice / 2
-                var gEndA = gStartA + slice
-                var glowPass = [
-                    { w: 10, a: 0.12 },
-                    { w: 6,  a: 0.22 },
-                    { w: 3,  a: 0.5  },
-                    { w: 1.5, a: 0.95 }
-                ]
-                for (var g = 0; g < glowPass.length; g++) {
-                    ctx.beginPath()
-                    ctx.arc(cx, cy, outerR, gStartA, gEndA)
-                    ctx.arc(cx, cy, innerR, gEndA, gStartA, true)
-                    ctx.closePath()
-                    ctx.strokeStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, glowPass[g].a)
-                    ctx.lineWidth = glowPass[g].w
-                    ctx.stroke()
-                }
+    // Selected-sector highlight: painted once as the top (index 0) sector,
+    // then rotated to the hovered sector so it glides between items.
+    Canvas {
+        id: wheelHighlight
+        visible: isWheel && itemCount > 0
+        anchors.centerIn: parent
+        width: wheelCanvas.width; height: width
+
+        rotation: root.lastSelected * 360 / Math.max(1, itemCount)
+        // Only glide once already shown — appearing from nothing jumps
+        // straight to the hovered sector instead of sweeping in from the last one
+        Behavior on rotation {
+            enabled: wheelHighlight.opacity > 0.5
+            RotationAnimation { duration: 160 * animScale; direction: RotationAnimation.Shortest; easing.type: Easing.OutCubic }
+        }
+        opacity: root.selectedIndex >= 0 ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
+
+        property int n: itemCount
+        property real op: root.bgOpacity
+        property real outerR: root.wheelOuterR
+        property real innerR: root.wheelSectorInnerR
+        property color accent: accentColor
+        onNChanged: requestPaint()
+        onOpChanged: requestPaint()
+        onOuterRChanged: requestPaint()
+        onInnerRChanged: requestPaint()
+        onAccentChanged: requestPaint()
+        Component.onCompleted: requestPaint()
+
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            if (n <= 0) return
+            var cx = width/2, cy = height/2
+            var slice = 2 * Math.PI / n
+            var startA = -Math.PI / 2 - slice / 2
+            var endA = startA + slice
+
+            // Neon-tinted fill (same inset gap as the base sectors)
+            ctx.beginPath()
+            ctx.arc(cx, cy, outerR, startA + 0.02, endA - 0.02)
+            ctx.arc(cx, cy, innerR, endA - 0.02, startA + 0.02, true)
+            ctx.closePath()
+            ctx.fillStyle = Qt.rgba(
+                Kirigami.Theme.backgroundColor.r * 1.3 + accent.r * 0.22,
+                Kirigami.Theme.backgroundColor.g * 1.3 + accent.g * 0.22,
+                Kirigami.Theme.backgroundColor.b * 1.3 + accent.b * 0.22,
+                op)
+            ctx.fill()
+
+            // Neon edge glow — layered strokes fake a soft blur
+            var glowPass = [
+                { w: 10, a: 0.12 },
+                { w: 6,  a: 0.22 },
+                { w: 3,  a: 0.5  },
+                { w: 1.5, a: 0.95 }
+            ]
+            for (var g = 0; g < glowPass.length; g++) {
+                ctx.beginPath()
+                ctx.arc(cx, cy, outerR, startA, endA)
+                ctx.arc(cx, cy, innerR, endA, startA, true)
+                ctx.closePath()
+                ctx.strokeStyle = Qt.rgba(accent.r, accent.g, accent.b, glowPass[g].a)
+                ctx.lineWidth = glowPass[g].w
+                ctx.stroke()
             }
         }
     }
 
     // Wheel center dark circle
     Rectangle {
+        id: wheelHub
         visible: isWheel
         anchors.centerIn: parent
         width: 40; height: 40; radius: width / 2
+        transform: Scale { origin.x: wheelHub.width / 2; origin.y: wheelHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
         color: Qt.rgba(
             Kirigami.Theme.backgroundColor.r * 0.3,
             Kirigami.Theme.backgroundColor.g * 0.3,
@@ -405,6 +496,7 @@ Item {
             readonly property var pos: index < itemPositions.length ? itemPositions[index] : null
             x: pos ? pos.x - width / 2 : 0
             y: pos ? pos.y - height / 2 : 0
+            transform: Scale { origin.x: wheelItem.width / 2; origin.y: wheelItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.3
             Component.onCompleted: wheelEnterAnim.start()
@@ -446,6 +538,7 @@ Item {
                 id: wheelHoverScale
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
+                opacity: root.fxOpacity(index)
                 Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
                 Kirigami.Icon {
@@ -472,10 +565,16 @@ Item {
         width: effectiveRadius * 2 + itemSize + 30; height: width
         property real rot: root.semicircleRotation
         property real op: root.bgOpacity
-        property int sel: root.selectedIndex
+        // Spotlight slides between items (spotA) and fades in/out (spotT);
+        // the slide is skipped while faded out so it appears in place
+        property real spotA: root.lastSelected < itemPositions.length ? itemPositions[root.lastSelected].angle : 0
+        Behavior on spotA { enabled: semicircleBg.spotT > 0.5; NumberAnimation { duration: 160 * animScale; easing.type: Easing.OutCubic } }
+        property real spotT: root.selectedIndex >= 0 ? 1 : 0
+        Behavior on spotT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
         onRotChanged: requestPaint()
         onOpChanged: requestPaint()
-        onSelChanged: requestPaint()
+        onSpotAChanged: requestPaint()
+        onSpotTChanged: requestPaint()
         Component.onCompleted: requestPaint()
         onPaint: {
             var ctx = getContext("2d")
@@ -497,12 +596,11 @@ Item {
 
             // Soft accent spotlight behind the hovered/selected item, clipped
             // to the half-disk so it never bleeds past the arc edge
-            if (sel >= 0 && sel < itemPositions.length) {
-                var sa = itemPositions[sel].angle
-                var spotX = cx + Math.cos(sa) * r * 0.55
-                var spotY = cy + Math.sin(sa) * r * 0.55
+            if (spotT > 0) {
+                var spotX = cx + Math.cos(spotA) * r * 0.55
+                var spotY = cy + Math.sin(spotA) * r * 0.55
                 var spot = ctx.createRadialGradient(spotX, spotY, 0, spotX, spotY, r * 0.6)
-                spot.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.3 * op))
+                spot.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.3 * op * spotT))
                 spot.addColorStop(1, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0))
                 ctx.save()
                 ctx.beginPath()
@@ -546,6 +644,7 @@ Item {
             readonly property var pos: index < itemPositions.length ? itemPositions[index] : null
             x: pos ? pos.x - width / 2 : 0
             y: pos ? pos.y - height / 2 : 0
+            transform: Scale { origin.x: circItem.width / 2; origin.y: circItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.4
             Component.onCompleted: circEnter.start()
@@ -561,6 +660,7 @@ Item {
             Item {
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
+                opacity: root.fxOpacity(index)
                 Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
                 // Hover glow halo (matches hexGlow/wheelGlow — was missing
@@ -653,9 +753,11 @@ Item {
     // Center button (semicircle only — hexagonal uses the glowing ring
     // center above; wheel has its own dark hub)
     Rectangle {
+        id: semiHub
         visible: isSemicircle
         anchors.centerIn: parent
         width: 40; height: 40; radius: width / 2
+        transform: Scale { origin.x: semiHub.width / 2; origin.y: semiHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
         color: centerHovered ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.18 * bgOpacity) : Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.95 * bgOpacity)
         border.width: 2
         border.color: centerHovered ? accentColor : Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.5 * bgOpacity)
@@ -714,7 +816,9 @@ Item {
             return Math.floor((norm + slice / 2) / slice) % itemCount
         }
 
-        onPositionChanged: (mouse) => {
+        onPositionChanged: (mouse) => { if (!launching) updateHover(mouse) }
+
+        function updateHover(mouse) {
             var dx = mouse.x - centerX, dy = mouse.y - centerY
             var dist = Math.sqrt(dx * dx + dy * dy)
 
@@ -743,16 +847,29 @@ Item {
             }
         }
 
-        onClicked: (mouse) => {
-            var dx = mouse.x - centerX, dy = mouse.y - centerY
-            var dist = Math.sqrt(dx * dx + dy * dy)
-            var centerR = isWheel ? wheelInnerR - 4 : centerSize / 2
+        onPressed: (mouse) => {
+            if (launching) return
+            updateHover(mouse)  // covers a click/tap with no prior hover move
+            pressedCenter = centerHovered
+            pressedIndex = selectedIndex
+            pressing = true
+        }
+        onReleased: pressing = false
+        onCanceled: { pressing = false; pressedIndex = -1; pressedCenter = false }
 
-            if (dist < centerR) { root.openSettings() }
-            else if (selectedIndex >= 0 && menuItems[selectedIndex]) { root.launchApp(menuItems[selectedIndex].desktop) }
-            else { root.hide() }
+        // Only act when released over what was pressed — dragging off the
+        // pressed item/hub cancels instead of launching something else
+        onClicked: {
+            if (launching) return
+            if (pressedCenter) {
+                if (centerHovered) root.openSettings()
+            } else if (pressedIndex >= 0) {
+                if (selectedIndex === pressedIndex && menuItems[pressedIndex]) root.startLaunch(pressedIndex)
+            } else if (!centerHovered && selectedIndex < 0) {
+                root.hide()
+            }
         }
 
-        onExited: { centerHovered = false; selectedIndex = -1; activeLabel = "" }
+        onExited: { if (!launching) { centerHovered = false; selectedIndex = -1; activeLabel = "" } }
     }
 }

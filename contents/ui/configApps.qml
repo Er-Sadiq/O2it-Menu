@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as Plasma5Support
+import org.kde.iconthemes as KIconThemes
 
 KCM.SimpleKCM {
     id: configRoot
@@ -87,6 +88,7 @@ KCM.SimpleKCM {
         connectedSources: []
         onNewData: (sourceName, data) => {
             disconnectSource(sourceName)
+            configRoot.appsLoading = false
             systemAppsModel.clear()
             var out = (data["stdout"] || "").split("\n")
             for (var i = 0; i < out.length; i++) {
@@ -102,6 +104,7 @@ KCM.SimpleKCM {
             }
         }
         function refresh() {
+            configRoot.appsLoading = true
             var scriptPath = Qt.resolvedUrl("list-apps.sh").toString().replace(/^file:\/\//, "")
             connectSource("sh '" + scriptPath.replace(/'/g, "'\\''") + "'")
         }
@@ -111,6 +114,22 @@ KCM.SimpleKCM {
     // ── Picker state ────────────────────────────────────────
     property bool picking: false
     property string pickerQuery: ""
+    property bool appsLoading: false
+    readonly property int pickerMatchCount: {
+        var q = pickerQuery.toLowerCase()
+        if (q === "") return systemAppsModel.count
+        var c = 0
+        for (var i = 0; i < systemAppsModel.count; i++) {
+            var name = systemAppsModel.get(i).name
+            if (name && name.toLowerCase().indexOf(q) !== -1) c++
+        }
+        return c
+    }
+
+    KIconThemes.IconDialog {
+        id: iconDialog
+        onIconNameChanged: { if (iconName) configRoot.editIcon = iconName }
+    }
 
     function beginPick() {
         picking = true
@@ -185,35 +204,29 @@ KCM.SimpleKCM {
             model: listModel
 
             delegate: Rectangle {
+                id: rowCard
                 Layout.fillWidth: true
                 height: delegateRow.implicitHeight + Kirigami.Units.largeSpacing
                 radius: 8
-                color: Qt.rgba(
-                    Kirigami.Theme.backgroundColor.r,
-                    Kirigami.Theme.backgroundColor.g,
-                    Kirigami.Theme.backgroundColor.b,
-                    0.5
-                )
+                readonly property bool hovered: rowHover.hovered
+                color: hovered
+                    ? Qt.rgba(Kirigami.Theme.highlightColor.r, Kirigami.Theme.highlightColor.g, Kirigami.Theme.highlightColor.b, 0.12)
+                    : Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.5)
                 border.width: 1
-                border.color: Qt.rgba(
-                    Kirigami.Theme.textColor.r,
-                    Kirigami.Theme.textColor.g,
-                    Kirigami.Theme.textColor.b,
-                    0.08
-                )
+                border.color: hovered
+                    ? Qt.rgba(Kirigami.Theme.highlightColor.r, Kirigami.Theme.highlightColor.g, Kirigami.Theme.highlightColor.b, 0.5)
+                    : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.08)
+                Behavior on color { ColorAnimation { duration: Kirigami.Units.shortDuration } }
+                Behavior on border.color { ColorAnimation { duration: Kirigami.Units.shortDuration } }
+
+                HoverHandler { id: rowHover }
 
                 RowLayout {
                     id: delegateRow
                     anchors.fill: parent
                     anchors.margins: Kirigami.Units.smallSpacing
+                    anchors.leftMargin: Kirigami.Units.largeSpacing
                     spacing: Kirigami.Units.largeSpacing
-
-                    QQC2.Label {
-                        text: (index + 1) + "."
-                        opacity: 0.4
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 1.5
-                        horizontalAlignment: Text.AlignRight
-                    }
 
                     Kirigami.Icon {
                         source: model.icon
@@ -261,10 +274,30 @@ KCM.SimpleKCM {
             }
         }
 
+        // ── Empty state ─────────────────────────────────────
+        Kirigami.PlaceholderMessage {
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.gridUnit * 2
+            visible: listModel.count === 0 && !configRoot.picking && !configRoot.editing
+            icon.name: "view-grid"
+            text: i18n("No applications yet")
+            explanation: i18n("Add apps to show them in the radial menu.")
+            helpfulAction: Kirigami.Action {
+                icon.name: "list-add"
+                text: i18n("Add Application")
+                onTriggered: configRoot.beginPick()
+            }
+        }
+
         // ── App picker (installed applications) ─────────────
         Rectangle {
+            id: pickerPanel
             Layout.fillWidth: true
-            visible: configRoot.picking
+            // Fade + slide in/out instead of popping
+            opacity: configRoot.picking ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic } }
+            transform: Translate { y: (1 - pickerPanel.opacity) * -Kirigami.Units.gridUnit }
             height: pickerCol.implicitHeight + Kirigami.Units.largeSpacing * 2
             radius: 8
             color: Qt.rgba(
@@ -304,6 +337,20 @@ KCM.SimpleKCM {
                         id: appListView
                         model: systemAppsModel
                         boundsBehavior: Flickable.StopAtBounds
+
+                        QQC2.BusyIndicator {
+                            anchors.centerIn: parent
+                            running: configRoot.appsLoading
+                            visible: running
+                        }
+
+                        Kirigami.PlaceholderMessage {
+                            anchors.centerIn: parent
+                            width: parent.width - Kirigami.Units.gridUnit * 4
+                            visible: !configRoot.appsLoading && configRoot.pickerMatchCount === 0
+                            icon.name: "edit-none"
+                            text: configRoot.pickerQuery === "" ? i18n("No applications found") : i18n("No apps match \"%1\"", configRoot.pickerQuery)
+                        }
 
                         delegate: QQC2.ItemDelegate {
                             id: appDelegate
@@ -359,8 +406,12 @@ KCM.SimpleKCM {
 
         // ── Inline manual edit / add form ────────────────────
         Rectangle {
+            id: editPanel
             Layout.fillWidth: true
-            visible: configRoot.editing
+            opacity: configRoot.editing ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic } }
+            transform: Translate { y: (1 - editPanel.opacity) * -Kirigami.Units.gridUnit }
             height: editFormCol.implicitHeight + Kirigami.Units.largeSpacing * 2
             radius: 8
             color: Qt.rgba(
@@ -390,20 +441,13 @@ KCM.SimpleKCM {
                         placeholderText: i18n("e.g. Firefox")
                         onTextChanged: configRoot.editLabel = text
                     }
-                    RowLayout {
+                    QQC2.Button {
                         Kirigami.FormData.label: i18n("Icon:")
-                        spacing: Kirigami.Units.smallSpacing
-                        QQC2.TextField {
-                            text: configRoot.editIcon
-                            placeholderText: i18n("e.g. internet-web-browser")
-                            onTextChanged: configRoot.editIcon = text
-                            Layout.fillWidth: true
-                        }
-                        Kirigami.Icon {
-                            source: configRoot.editIcon
-                            Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-                            Layout.preferredHeight: Kirigami.Units.iconSizes.medium
-                        }
+                        icon.name: configRoot.editIcon || "application-x-executable"
+                        icon.width: Kirigami.Units.iconSizes.medium
+                        icon.height: Kirigami.Units.iconSizes.medium
+                        text: i18n("Choose…")
+                        onClicked: iconDialog.open()
                     }
                     QQC2.TextField {
                         Kirigami.FormData.label: i18n("Desktop file:")
@@ -436,13 +480,14 @@ KCM.SimpleKCM {
             Layout.topMargin: Kirigami.Units.largeSpacing
             icon.name: "list-add"
             text: i18n("Add Application")
-            visible: !configRoot.editing && !configRoot.picking
+            visible: !configRoot.editing && !configRoot.picking && listModel.count > 0
             onClicked: beginPick()
         }
 
         QQC2.Label {
             Layout.alignment: Qt.AlignHCenter
             text: i18n("%1 items in menu", listModel.count)
+            visible: listModel.count > 0
             opacity: 0.4
             font.pointSize: Kirigami.Theme.smallFont.pointSize
         }

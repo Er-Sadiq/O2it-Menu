@@ -3,6 +3,8 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
+import org.kde.iconthemes as KIconThemes
+import org.kde.kquickcontrols as KQuickControls
 
 KCM.SimpleKCM {
     id: appearanceRoot
@@ -29,6 +31,18 @@ KCM.SimpleKCM {
         i18n("Wheel (Pie Sectors)"),
         i18n("Semi-Circle (Arc)")
     ]
+
+    // One shared icon dialog; iconTarget says which config key it's editing
+    property string iconTarget: ""
+    KIconThemes.IconDialog {
+        id: iconDialog
+        onIconNameChanged: {
+            if (!iconName) return
+            if (appearanceRoot.iconTarget === "panel") cfg_panelIcon = iconName
+            else if (appearanceRoot.iconTarget === "center") cfg_centerIcon = iconName
+        }
+    }
+    function pickIcon(target) { iconTarget = target; iconDialog.open() }
 
     Kirigami.FormLayout {
 
@@ -102,36 +116,22 @@ KCM.SimpleKCM {
             Kirigami.FormData.isSection: true
         }
 
-        RowLayout {
+        QQC2.Button {
             Kirigami.FormData.label: i18n("Panel icon:")
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.TextField {
-                text: cfg_panelIcon
-                placeholderText: "view-grid"
-                onTextChanged: cfg_panelIcon = text
-                Layout.fillWidth: true
-            }
-            Kirigami.Icon {
-                source: cfg_panelIcon || "view-grid"
-                Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
-            }
+            icon.name: cfg_panelIcon || "view-grid"
+            icon.width: Kirigami.Units.iconSizes.medium
+            icon.height: Kirigami.Units.iconSizes.medium
+            text: i18n("Choose…")
+            onClicked: appearanceRoot.pickIcon("panel")
         }
 
-        RowLayout {
+        QQC2.Button {
             Kirigami.FormData.label: i18n("Center icon:")
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.TextField {
-                text: cfg_centerIcon
-                placeholderText: "configure"
-                onTextChanged: cfg_centerIcon = text
-                Layout.fillWidth: true
-            }
-            Kirigami.Icon {
-                source: cfg_centerIcon || "configure"
-                Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
-            }
+            icon.name: cfg_centerIcon || "configure"
+            icon.width: Kirigami.Units.iconSizes.medium
+            icon.height: Kirigami.Units.iconSizes.medium
+            text: i18n("Choose…")
+            onClicked: appearanceRoot.pickIcon("center")
         }
 
         Item { Kirigami.FormData.isSection: true }
@@ -276,20 +276,11 @@ KCM.SimpleKCM {
                         cfg_accentColorCustom = "#3daee9"
                 }
             }
-            QQC2.TextField {
+            KQuickControls.ColorButton {
                 enabled: customAccentRadio.checked
-                text: cfg_accentColorCustom
-                placeholderText: "#3daee9"
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 7
-                onTextChanged: { if (customAccentRadio.checked) cfg_accentColorCustom = text }
-            }
-            Rectangle {
-                width: Kirigami.Units.gridUnit * 1.5
-                height: Kirigami.Units.gridUnit * 1.5
-                radius: 4
+                showAlphaChannel: false
                 color: cfg_accentColorCustom !== "" ? cfg_accentColorCustom : Kirigami.Theme.highlightColor
-                border.width: 1
-                border.color: Qt.rgba(0, 0, 0, 0.2)
+                onAccepted: picked => { cfg_accentColorCustom = picked.toString() }
             }
         }
     }
