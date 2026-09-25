@@ -18,7 +18,9 @@ PlasmoidItem {
     // Plasmoid.* attached property — confirmed via the installed
     // plasmoidplugin.qmltypes, where it's declared on
     // PlasmaQuick::AppletQuickItem, not on the Plasmoid interface.
-    activationTogglesExpanded: true
+    // In a panel the menu opens in our own frameless dialog instead of the
+    // applet popup, so the shortcut is routed via onActivated below.
+    activationTogglesExpanded: !inPanel
 
     // ── Configuration ───────────────────────────────────────
     readonly property int cfgMenuSize: Plasmoid.configuration.menuSize
@@ -87,54 +89,97 @@ PlasmoidItem {
             hoverEnabled: true
             // When "require shortcut" is on, the panel icon is inert — the
             // menu only opens via the bound global shortcut action below.
-            onClicked: { if (!root.cfgRequireShortcut) root.expanded = !root.expanded }
+            onClicked: { if (!root.cfgRequireShortcut) root.toggleMenu() }
         }
     }
 
-    // ── Full representation ─────────────────────────────────
-    fullRepresentation: Item {
-        id: fullRoot
-        Layout.preferredWidth: root.cfgMenuSize + 60
-        Layout.preferredHeight: root.cfgMenuSize + 60
-        Layout.minimumWidth: root.cfgMenuSize + 60
-        Layout.minimumHeight: root.cfgMenuSize + 60
+    // ── Menu (shared by desktop full representation + panel dialog) ──
+    Component {
+        id: menuComponent
+        Item {
+            id: fullRoot
+            width: root.cfgMenuSize + 60
+            height: root.cfgMenuSize + 60
+            Layout.preferredWidth: root.cfgMenuSize + 60
+            Layout.preferredHeight: root.cfgMenuSize + 60
+            Layout.minimumWidth: root.cfgMenuSize + 60
+            Layout.minimumHeight: root.cfgMenuSize + 60
 
-        AdvancedRadialMenu {
-            id: radialMenu
-            anchors.centerIn: parent
+            AdvancedRadialMenu {
+                id: radialMenu
+                anchors.centerIn: parent
 
-            menuItems: root.cfgItems
-            menuSize: root.cfgMenuSize
-            cfgIconSize: root.cfgIconSize
-            bgOpacity: root.cfgBgOpacity
-            showLabels: root.cfgShowLabels
-            showSectorLines: root.cfgShowSectorLines
-            accentColor: root.cfgAccentColor !== ""
-                ? root.cfgAccentColor
-                : Kirigami.Theme.highlightColor
-            centerIcon: root.cfgCenterIcon || "configure"
-            menuLayout: root.cfgMenuLayout || "radial"
-            menuStyle: root.cfgMenuStyle || "glass"
-            semicircleRotation: root.cfgSemicircleRotation
-            centerGap: root.cfgCenterGap
+                menuItems: root.cfgItems
+                menuSize: root.cfgMenuSize
+                cfgIconSize: root.cfgIconSize
+                bgOpacity: root.cfgBgOpacity
+                showLabels: root.cfgShowLabels
+                showSectorLines: root.cfgShowSectorLines
+                accentColor: root.cfgAccentColor !== ""
+                    ? root.cfgAccentColor
+                    : Kirigami.Theme.highlightColor
+                centerIcon: root.cfgCenterIcon || "configure"
+                menuLayout: root.cfgMenuLayout || "radial"
+                menuStyle: root.cfgMenuStyle || "glass"
+                semicircleRotation: root.cfgSemicircleRotation
+                centerGap: root.cfgCenterGap
 
-            onLaunchApp: (desktopFile) => {
-                executable.launch(desktopFile)
-                root.expanded = false
+                onLaunchApp: (desktopFile) => {
+                    executable.launch(desktopFile)
+                    root.closeMenu()
+                }
+
+                onCloseRequested: root.closeMenu()
+
+                onOpenSettings: {
+                    // Trigger config dialog FIRST while QML context is still alive
+                    Plasmoid.internalAction("configure").trigger()
+                    root.closeMenu()
+                }
             }
 
-            onCloseRequested: {
-                root.expanded = false
-            }
-
-            onOpenSettings: {
-                // Trigger config dialog FIRST while QML context is still alive
-                Plasmoid.internalAction("configure").trigger()
-                root.expanded = false
-            }
+            Component.onCompleted: radialMenu.show()
         }
+    }
 
-        Component.onCompleted: radialMenu.show()
+    fullRepresentation: menuComponent
+
+    // ── Panel menu ──────────────────────────────────────────
+    // The applet popup always draws Plasma's framed box and has no way to
+    // turn it off; a PlasmaCore.Dialog does (backgroundHints: NoBackground),
+    // so in a panel only the menu itself shows. It's recreated on each open,
+    // which replays the entrance animation.
+    PlasmaCore.Dialog {
+        id: panelMenu
+        visible: false
+        visualParent: root.compactRepresentationItem
+        location: Plasmoid.location
+        type: PlasmaCore.Dialog.PopupMenu
+        flags: Qt.WindowStaysOnTopHint
+        backgroundHints: PlasmaCore.Dialog.NoBackground
+        hideOnWindowDeactivate: true
+        mainItem: Loader {
+            width: root.cfgMenuSize + 60
+            height: root.cfgMenuSize + 60
+            active: panelMenu.visible
+            sourceComponent: menuComponent
+        }
+    }
+
+    function toggleMenu() {
+        if (inPanel) panelMenu.visible = !panelMenu.visible
+        else root.expanded = !root.expanded
+    }
+    function closeMenu() {
+        if (inPanel) panelMenu.visible = false
+        else root.expanded = false
+    }
+
+    // Global shortcut (Applet::activated) in panel mode
+    Connections {
+        target: Plasmoid
+        enabled: root.inPanel
+        function onActivated() { root.toggleMenu() }
     }
 
     onExpandedChanged: {
@@ -159,13 +204,13 @@ PlasmoidItem {
     // applet already exposes via right-click → "Configure Shortcuts…" (or
     // System Settings → Shortcuts → Plasma) with no registration code
     // needed. That shortcut fires Applet::activated(), which toggles this
-    // widget open/closed only because of `activationTogglesExpanded: true`
-    // set above.
+    // widget open/closed via `activationTogglesExpanded` (desktop) or the
+    // onActivated handler above (panel).
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
             text: i18n("Toggle Radial Menu")
             icon.name: root.cfgPanelIcon || "view-grid"
-            onTriggered: root.expanded = !root.expanded
+            onTriggered: root.toggleMenu()
         }
     ]
 
