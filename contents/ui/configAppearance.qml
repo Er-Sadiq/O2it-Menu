@@ -5,9 +5,19 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.iconthemes as KIconThemes
 import org.kde.kquickcontrols as KQuickControls
+import org.kde.plasma.plasmoid
 
 KCM.SimpleKCM {
     id: appearanceRoot
+
+    // The global shortcut isn't a cfg_ key — it lives on the applet itself
+    // (same approach as Plasma's own Shortcuts page). Plasma's config dialog
+    // calls saveConfig() on Apply/OK and enables Apply via unsavedChanges.
+    property bool unsavedChanges: false
+    function saveConfig() {
+        Plasmoid.globalShortcut = shortcutButton.keySequence
+        unsavedChanges = false
+    }
 
     property alias cfg_menuSize: menuSizeSlider.value
     property alias cfg_iconSize: iconSizeSlider.value
@@ -124,14 +134,23 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: requireShortcutCheck
             Kirigami.FormData.label: i18n("Trigger:")
-            text: i18n("Only open via keyboard shortcut")
+            text: i18n("Hold a keyboard shortcut to show the menu")
+        }
+
+        KQuickControls.KeySequenceItem {
+            id: shortcutButton
+            Kirigami.FormData.label: i18n("Shortcut:")
+            visible: requireShortcutCheck.checked
+            keySequence: Plasmoid.globalShortcut
+            patterns: KQuickControls.ShortcutPattern.Modifier | KQuickControls.ShortcutPattern.ModifierAndKey
+            onKeySequenceModified: appearanceRoot.unsavedChanges = keySequence !== Plasmoid.globalShortcut
         }
 
         Kirigami.InlineMessage {
             Layout.fillWidth: true
             visible: requireShortcutCheck.checked
             type: Kirigami.MessageType.Information
-            text: i18n("Bind the key: right-click this widget → Configure Shortcuts… (or System Settings → Shortcuts → Plasma) and assign a key to \"Toggle Radial Menu\".")
+            text: i18n("Set a shortcut above, then hold it: the menu appears in the middle of the screen. Point at an app and let go to launch it, or let go anywhere else to close. Press it again or Esc to close.")
         }
 
         Kirigami.InlineMessage {

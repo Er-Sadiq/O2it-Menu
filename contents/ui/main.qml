@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Window
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasma5support as Plasma5Support
@@ -18,9 +19,9 @@ PlasmoidItem {
     // Plasmoid.* attached property — confirmed via the installed
     // plasmoidplugin.qmltypes, where it's declared on
     // PlasmaQuick::AppletQuickItem, not on the Plasmoid interface.
-    // In a panel the menu opens in our own frameless dialog instead of the
-    // applet popup, so the shortcut is routed via onActivated below.
-    activationTogglesExpanded: !inPanel
+    // The shortcut is routed via onActivated below instead: panel and
+    // hold-to-show modes open our own frameless dialog, not the applet popup.
+    activationTogglesExpanded: false
 
     // ── Configuration ───────────────────────────────────────
     readonly property int cfgMenuSize: Plasmoid.configuration.menuSize
@@ -141,17 +142,38 @@ PlasmoidItem {
                 }
             }
 
+            // Helpers for the dialog / hold-to-show mode
+            function show() { radialMenu.show() }
+            function launchHovered() {
+                if (radialMenu.selectedIndex < 0) return false
+                radialMenu.startLaunch(radialMenu.selectedIndex)
+                return true
+            }
+
+            // Hold-to-show: the dialog takes keyboard focus when opened by the
+            // shortcut, so releasing the held key(s) arrives here
+            focus: true
+            Keys.onReleased: (event) => {
+                if (!root.holdOpen || event.isAutoRepeat) return
+                const mods = event.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+                const isMod = [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_AltGr, Qt.Key_Meta,
+                               Qt.Key_Super_L, Qt.Key_Super_R].indexOf(event.key) >= 0
+                // Wait until the whole chord is let go (e.g. Space up while Meta held)
+                if (isMod || mods === 0) root.releaseHold()
+            }
+            Keys.onEscapePressed: root.closeMenu()
+
             Component.onCompleted: radialMenu.show()
         }
     }
 
     fullRepresentation: menuComponent
 
-    // ── Panel menu ──────────────────────────────────────────
+    // ── Menu dialog (panel click + hold-to-show shortcut) ───
     // The applet popup always draws Plasma's framed box and has no way to
     // turn it off; a PlasmaCore.Dialog does (backgroundHints: NoBackground),
-    // so in a panel only the menu itself shows. It's recreated on each open,
-    // which replays the entrance animation.
+    // so only the menu itself shows. Opened from the panel icon it's anchored
+    // to the icon; opened by the shortcut it floats centered on the screen.
     PlasmaCore.Dialog {
         id: panelMenu
         visible: false
@@ -161,27 +183,66 @@ PlasmoidItem {
         flags: Qt.WindowStaysOnTopHint
         backgroundHints: PlasmaCore.Dialog.NoBackground
         hideOnWindowDeactivate: true
-        // Loader takes the loaded menu's size, so the dialog fits the content
+        // Loader takes the loaded menu's size, so the dialog fits the content.
+        // Kept loaded so the size is known before positioning.
         mainItem: Loader {
-            active: panelMenu.visible
+            id: dialogLoader
+            focus: true
+            active: root.inPanel || root.cfgRequireShortcut
             sourceComponent: menuComponent
+        }
+        onVisibleChanged: {
+            if (visible && dialogLoader.item) dialogLoader.item.show()
+            if (!visible) root.holdOpen = false
         }
     }
 
+    // True while the menu is open because the shortcut is being held
+    property bool holdOpen: false
+
     function toggleMenu() {
-        if (inPanel) panelMenu.visible = !panelMenu.visible
-        else root.expanded = !root.expanded
+        if (inPanel) {
+            if (panelMenu.visible) { closeMenu(); return }
+            panelMenu.visualParent = root.compactRepresentationItem
+            panelMenu.location = Plasmoid.location
+            panelMenu.visible = true
+        } else {
+            root.expanded = !root.expanded
+        }
     }
     function closeMenu() {
-        if (inPanel) panelMenu.visible = false
+        if (panelMenu.visible) panelMenu.visible = false
         else root.expanded = false
     }
 
-    // Global shortcut (Applet::activated) in panel mode
+    // Shortcut pressed in hold-to-show mode: centered on the screen, with
+    // keyboard focus so the key release reaches the menu. Pressing again
+    // closes it — a fallback for sessions where the release is swallowed.
+    function openHold() {
+        if (panelMenu.visible) { closeMenu(); return }
+        holdOpen = true
+        panelMenu.visualParent = null
+        panelMenu.location = PlasmaCore.Types.Floating
+        // Loader already has the menu's size; the dialog may not until shown
+        panelMenu.x = Screen.virtualX + (Screen.width - dialogLoader.width) / 2
+        panelMenu.y = Screen.virtualY + (Screen.height - dialogLoader.height) / 2
+        panelMenu.visible = true
+        panelMenu.requestActivate()
+    }
+
+    // Held key released: launch whatever the pointer is on, else close
+    function releaseHold() {
+        holdOpen = false
+        if (!(dialogLoader.item && dialogLoader.item.launchHovered())) closeMenu()
+    }
+
+    // Global shortcut (Applet::activated)
     Connections {
         target: Plasmoid
-        enabled: root.inPanel
-        function onActivated() { root.toggleMenu() }
+        function onActivated() {
+            if (root.cfgRequireShortcut) root.openHold()
+            else if (root.inPanel) root.toggleMenu()
+        }
     }
 
     onExpandedChanged: {
@@ -205,9 +266,8 @@ PlasmoidItem {
     // Plasma::Applet's built-in `globalShortcut` property, which every
     // applet already exposes via right-click → "Configure Shortcuts…" (or
     // System Settings → Shortcuts → Plasma) with no registration code
-    // needed. That shortcut fires Applet::activated(), which toggles this
-    // widget open/closed via `activationTogglesExpanded` (desktop) or the
-    // onActivated handler above (panel).
+    // needed (the Appearance page also binds it). That shortcut fires
+    // Applet::activated(), handled by onActivated above.
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
             text: i18n("Toggle Radial Menu")
