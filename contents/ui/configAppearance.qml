@@ -22,6 +22,7 @@ KCM.SimpleKCM {
     property string cfg_panelIcon
     property string cfg_centerIcon
     property string cfg_menuLayout
+    property string cfg_menuStyle
 
     // Layout options — two parallel arrays (same pattern as colorpicker)
     readonly property var layoutValues: ["hexagonal", "wheel", "semicircle"]
@@ -29,6 +30,13 @@ KCM.SimpleKCM {
         i18n("Hexagonal (Hex Icons)"),
         i18n("Wheel (Pie Sectors)"),
         i18n("Semi-Circle (Arc)")
+    ]
+
+    readonly property var styleValues: ["glass", "neon", "minimal"]
+    readonly property var styleLabels: [
+        i18n("Glass (Depth)"),
+        i18n("Neon (Glow)"),
+        i18n("Minimal (Clean)")
     ]
 
     // One shared icon dialog; iconTarget says which config key it's editing
@@ -59,6 +67,15 @@ KCM.SimpleKCM {
             currentIndex: appearanceRoot.layoutValues.indexOf(cfg_menuLayout)
             onActivated: index => {
                 cfg_menuLayout = appearanceRoot.layoutValues[index]
+            }
+        }
+
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Style:")
+            model: appearanceRoot.styleLabels
+            currentIndex: Math.max(0, appearanceRoot.styleValues.indexOf(cfg_menuStyle))
+            onActivated: index => {
+                cfg_menuStyle = appearanceRoot.styleValues[index]
             }
         }
 

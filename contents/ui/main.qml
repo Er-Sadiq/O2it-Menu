@@ -31,6 +31,7 @@ PlasmoidItem {
     readonly property string cfgPanelIcon: Plasmoid.configuration.panelIcon
     readonly property string cfgCenterIcon: Plasmoid.configuration.centerIcon
     readonly property string cfgMenuLayout: Plasmoid.configuration.menuLayout
+    readonly property string cfgMenuStyle: Plasmoid.configuration.menuStyle
     readonly property bool cfgRequireShortcut: Plasmoid.configuration.requireShortcut
     readonly property int cfgSemicircleRotation: Plasmoid.configuration.semicircleRotation
     readonly property int cfgCenterGap: Plasmoid.configuration.centerGap
@@ -115,6 +116,7 @@ PlasmoidItem {
                 : Kirigami.Theme.highlightColor
             centerIcon: root.cfgCenterIcon || "configure"
             menuLayout: root.cfgMenuLayout || "radial"
+            menuStyle: root.cfgMenuStyle || "glass"
             semicircleRotation: root.cfgSemicircleRotation
             centerGap: root.cfgCenterGap
 

@@ -27,6 +27,31 @@ Item {
     property string menuLayout: "hexagonal"
     property int semicircleRotation: 0
     property int centerGap: 0
+    property string menuStyle: "glass"
+
+    // ── Style tokens ────────────────────────────────────────
+    // One drawing path per layout; each style is just these knobs.
+    //   glow      — hover halo strength multiplier
+    //   idleGlow  — accent glow/tint on resting items and rims
+    //   rim       — accent edge brightness multiplier
+    //   depth     — top→bottom / inner→outer gradient strength
+    //   highlight — glossy top-edge sheen
+    //   shadow    — soft drop shadow under shapes
+    //   pulseMin  — center pulse low point (1 = no pulse)
+    readonly property var st: ({
+        glass:   { glow: 0.8, idleGlow: 0,    rim: 0.6,  depth: 1.0, highlight: true,  shadow: true,  pulseMin: 0.8 },
+        neon:    { glow: 1.4, idleGlow: 0.35, rim: 1.2,  depth: 0.4, highlight: false, shadow: false, pulseMin: 0.5 },
+        minimal: { glow: 0.4, idleGlow: 0,    rim: 0.25, depth: 0,   highlight: false, shadow: false, pulseMin: 1.0 }
+    })[menuStyle] || ({ glow: 0.8, idleGlow: 0, rim: 0.6, depth: 1.0, highlight: true, shadow: true, pulseMin: 0.8 })
+
+    // Halo opacity for an item: hover falloff scaled by style, floored by idle glow
+    function haloOpacity(idx) {
+        return Math.min(1, Math.max(st.idleGlow * 0.6, magnifyGlow(idx) * st.glow))
+    }
+    function shade(c, f, a) {
+        return Qt.rgba(Math.min(1, c.r * f), Math.min(1, c.g * f), Math.min(1, c.b * f), a)
+    }
+    function withAlpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
 
     // ── Derived ─────────────────────────────────────────────
     width: menuSize; height: menuSize
@@ -197,10 +222,9 @@ Item {
                     id: hexGlow
                     anchors.centerIn: parent
                     width: parent.width + 18; height: width
-                    property real glowT: root.magnifyGlow(index)
-                    visible: glowT > 0
-                    opacity: glowT
-                    onGlowTChanged: requestPaint()
+                    opacity: root.haloOpacity(index)
+                    visible: opacity > 0
+                    onVisibleChanged: if (visible) requestPaint()
                     Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
                     onPaint: {
                         var ctx = getContext("2d")
@@ -213,16 +237,20 @@ Item {
                 }
 
                 // Hex container shape
+                // Oversized by 16px so the glass drop shadow isn't clipped
                 Canvas {
                     id: hexCanvas
-                    anchors.fill: parent
+                    anchors.centerIn: parent
+                    width: parent.width + 16; height: width
                     // 0 → 1 blend between idle and selected look, animated so
                     // fill/border cross-fade instead of snapping
                     property real selT: hexItem.isSel ? 1 : 0
                     Behavior on selT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
                     property real op: root.bgOpacity
+                    property var sty: root.st
                     onSelTChanged: requestPaint()
                     onOpChanged: requestPaint()
+                    onStyChanged: requestPaint()
                     Component.onCompleted: requestPaint()
 
                     function mix(c1, a1, c2, a2, t) {
@@ -233,13 +261,45 @@ Item {
                     onPaint: {
                         var ctx = getContext("2d")
                         ctx.reset()
-                        var r = Math.min(width, height) / 2 - 2
-                        Layouts.hexPath(ctx, width/2, height/2, r)
+                        var cx = width / 2, cy = height / 2
+                        var r = root.itemSize / 2 - 2
+                        var bg = Kirigami.Theme.backgroundColor
 
-                        ctx.fillStyle = mix(Kirigami.Theme.backgroundColor, 0.55, accentColor, 0.4, selT)
+                        // Body: vertical gradient, lighter top / darker bottom by depth
+                        ctx.save()
+                        if (sty.shadow) {
+                            ctx.shadowColor = Qt.rgba(0, 0, 0, 0.35 * op)
+                            ctx.shadowBlur = 8
+                            ctx.shadowOffsetY = 2
+                        }
+                        Layouts.hexPath(ctx, cx, cy, r)
+                        var body = ctx.createLinearGradient(0, cy - r, 0, cy + r)
+                        var top = mix(bg, 0.55, accentColor, 0.4, selT)
+                        body.addColorStop(0, root.shade(top, 1 + 0.25 * sty.depth, top.a))
+                        body.addColorStop(1, root.shade(top, 1 - 0.3 * sty.depth, top.a))
+                        ctx.fillStyle = body
                         ctx.fill()
+                        ctx.restore()
 
-                        ctx.strokeStyle = mix(Kirigami.Theme.textColor, 0.55, accentColor, 0.85, selT)
+                        // Glossy sheen across the top half
+                        if (sty.highlight) {
+                            Layouts.hexPath(ctx, cx, cy, r - 2)
+                            var sheen = ctx.createLinearGradient(0, cy - r, 0, cy)
+                            sheen.addColorStop(0, Qt.rgba(1, 1, 1, 0.16 * op))
+                            sheen.addColorStop(1, Qt.rgba(1, 1, 1, 0))
+                            ctx.fillStyle = sheen
+                            ctx.fill()
+                        }
+
+                        // Outline: neon tints the idle edge toward accent
+                        Layouts.hexPath(ctx, cx, cy, r)
+                        var idleEdge = mix(Kirigami.Theme.textColor, sty.depth === 0 ? 0.35 : 0.55,
+                                           accentColor, 0.85, Math.min(1, sty.idleGlow * 1.6))
+                        var selEdge = root.withAlpha(accentColor, Math.min(1, 0.85 * sty.rim + 0.15) * op)
+                        ctx.strokeStyle = Qt.rgba(idleEdge.r + (selEdge.r - idleEdge.r) * selT,
+                                                  idleEdge.g + (selEdge.g - idleEdge.g) * selT,
+                                                  idleEdge.b + (selEdge.b - idleEdge.b) * selT,
+                                                  idleEdge.a + (selEdge.a - idleEdge.a) * selT)
                         ctx.lineWidth = 1.5 + 0.5 * selT
                         ctx.stroke()
                     }
@@ -267,20 +327,45 @@ Item {
         // Outer glow ring
         Canvas {
             id: glowRingCanvas
-            anchors.fill: parent
+            anchors.centerIn: parent
+            width: parent.width + 12; height: width
             property bool hov: root.centerHovered
             property real op: root.bgOpacity
+            property var sty: root.st
             onHovChanged: requestPaint()
             onOpChanged: requestPaint()
+            onStyChanged: requestPaint()
             Component.onCompleted: requestPaint()
 
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
                 var cx = width/2, cy = height/2
-                var outerR = width/2
+                var outerR = width/2 - 6
                 var innerR = outerR * 0.62
-                var ringW = outerR - innerR
+
+                // Dark glass disc inside the ring so the icon reads on any wallpaper
+                if (sty.depth > 0) {
+                    var disc = ctx.createLinearGradient(0, cy - innerR, 0, cy + innerR)
+                    disc.addColorStop(0, root.shade(Kirigami.Theme.backgroundColor, 1.1, 0.7 * op * sty.depth))
+                    disc.addColorStop(1, root.shade(Kirigami.Theme.backgroundColor, 0.6, 0.7 * op * sty.depth))
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, innerR, 0, 2 * Math.PI)
+                    ctx.fillStyle = disc
+                    ctx.fill()
+                }
+
+                // Neon: soft outer halo passes around the ring
+                if (sty.idleGlow > 0) {
+                    var halo = [{ w: 8, a: 0.1 }, { w: 4, a: 0.2 }]
+                    for (var h = 0; h < halo.length; h++) {
+                        ctx.beginPath()
+                        ctx.arc(cx, cy, outerR, 0, 2 * Math.PI)
+                        ctx.strokeStyle = root.withAlpha(accentColor, halo[h].a * op)
+                        ctx.lineWidth = halo[h].w
+                        ctx.stroke()
+                    }
+                }
 
                 // Ring shape
                 ctx.beginPath()
@@ -288,7 +373,7 @@ Item {
                 ctx.arc(cx, cy, innerR, 2 * Math.PI, 0, true)
                 ctx.closePath()
 
-                var alpha = (hov ? 0.8 : 0.5) * op
+                var alpha = Math.min(1, (hov ? 0.8 : 0.5) * (0.5 + 0.5 * sty.rim)) * op
                 ctx.fillStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, alpha)
                 ctx.fill()
 
@@ -302,10 +387,11 @@ Item {
 
             // Pulsing animation — only spend cycles on this while it's actually shown
             SequentialAnimation on opacity {
-                running: isHexagonal
+                running: isHexagonal && root.st.pulseMin < 1
                 loops: Animation.Infinite
+                onStopped: glowRingCanvas.opacity = 1
                 NumberAnimation { to: 1.0; duration: 1800 * animScale; easing.type: Easing.InOutSine }
-                NumberAnimation { to: 0.65; duration: 1800 * animScale; easing.type: Easing.InOutSine }
+                NumberAnimation { to: root.st.pulseMin; duration: 1800 * animScale; easing.type: Easing.InOutSine }
             }
         }
 
@@ -334,9 +420,11 @@ Item {
         property bool divLines: root.showSectorLines
         property real op: root.bgOpacity
         property real gap: root.centerGap
+        property var sty: root.st
         onDivLinesChanged: requestPaint()
         onOpChanged: requestPaint()
         onGapChanged: requestPaint()
+        onStyChanged: requestPaint()
         Component.onCompleted: requestPaint()
 
         onPaint: {
@@ -354,10 +442,19 @@ Item {
             var gap = 0.04
             var halfGap = gap / 2
 
+            // Sector fill: radial gradient, darker at the hub → lighter at the
+            // rim by depth (flat when depth is 0). Neon sits a bit darker so
+            // its accent rim pops.
+            var bg = Kirigami.Theme.backgroundColor
+            var baseF = sty.idleGlow > 0 ? 0.55 : 0.7
+            var fill = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
+            fill.addColorStop(0, root.shade(bg, baseF * (1 - 0.25 * sty.depth), op))
+            fill.addColorStop(1, root.shade(bg, baseF * (1 + 0.3 * sty.depth), op))
+
             // Draw each sector
             for (var i = 0; i < n; i++) {
-            var startA = slice * i - Math.PI / 2 - slice / 2 + halfGap
-            var endA = slice * i - Math.PI / 2 + slice / 2 - halfGap
+                var startA = slice * i - Math.PI / 2 - slice / 2 + halfGap
+                var endA = slice * i - Math.PI / 2 + slice / 2 - halfGap
 
                 // Sector path (annular wedge)
                 ctx.beginPath()
@@ -365,12 +462,15 @@ Item {
                 ctx.arc(cx, cy, innerR, endA, startA, true)
                 ctx.closePath()
 
-                ctx.fillStyle = Qt.rgba(
-                    Kirigami.Theme.backgroundColor.r * 0.7,
-                    Kirigami.Theme.backgroundColor.g * 0.7,
-                    Kirigami.Theme.backgroundColor.b * 0.7,
-                    root.bgOpacity)
+                ctx.save()
+                if (sty.shadow) {
+                    ctx.shadowColor = Qt.rgba(0, 0, 0, 0.3 * op)
+                    ctx.shadowBlur = 8
+                    ctx.shadowOffsetY = 2
+                }
+                ctx.fillStyle = fill
                 ctx.fill()
+                ctx.restore()
 
                 // Sector border (divider lines)
                 if (divLines) {
@@ -380,10 +480,35 @@ Item {
                 }
             }
 
-            // Outer rim
+            // Glossy sheen on the upper half of the ring
+            if (sty.highlight) {
+                var sheen = ctx.createLinearGradient(0, cy - outerR, 0, cy)
+                sheen.addColorStop(0, Qt.rgba(1, 1, 1, 0.1 * op))
+                sheen.addColorStop(1, Qt.rgba(1, 1, 1, 0))
+                ctx.beginPath()
+                ctx.arc(cx, cy, outerR - 1, 0, 2 * Math.PI)
+                ctx.arc(cx, cy, innerR + 1, 2 * Math.PI, 0, true)
+                ctx.closePath()
+                ctx.fillStyle = sheen
+                ctx.fill()
+            }
+
+            // Outer rim — neon lights it in accent with a soft halo
+            if (sty.idleGlow > 0) {
+                var halo = [{ w: 6, a: 0.12 }, { w: 3, a: 0.25 }]
+                for (var h = 0; h < halo.length; h++) {
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, outerR, 0, 2 * Math.PI)
+                    ctx.strokeStyle = root.withAlpha(accentColor, halo[h].a * op)
+                    ctx.lineWidth = halo[h].w
+                    ctx.stroke()
+                }
+            }
             ctx.beginPath()
             ctx.arc(cx, cy, outerR, 0, 2 * Math.PI)
-            ctx.strokeStyle = Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12 * root.bgOpacity)
+            ctx.strokeStyle = sty.idleGlow > 0
+                ? root.withAlpha(accentColor, 0.6 * op)
+                : root.withAlpha(Kirigami.Theme.textColor, (sty.depth === 0 ? 0.08 : 0.14) * op)
             ctx.lineWidth = 1.5
             ctx.stroke()
 
@@ -417,6 +542,8 @@ Item {
         property real outerR: root.wheelOuterR
         property real innerR: root.wheelSectorInnerR
         property color accent: accentColor
+        property var sty: root.st
+        onStyChanged: requestPaint()
         onNChanged: requestPaint()
         onOpChanged: requestPaint()
         onOuterRChanged: requestPaint()
@@ -457,7 +584,7 @@ Item {
                 ctx.arc(cx, cy, outerR, startA, endA)
                 ctx.arc(cx, cy, innerR, endA, startA, true)
                 ctx.closePath()
-                ctx.strokeStyle = Qt.rgba(accent.r, accent.g, accent.b, glowPass[g].a)
+                ctx.strokeStyle = Qt.rgba(accent.r, accent.g, accent.b, Math.min(1, glowPass[g].a * sty.rim))
                 ctx.lineWidth = glowPass[g].w
                 ctx.stroke()
             }
@@ -471,13 +598,15 @@ Item {
         anchors.centerIn: parent
         width: 40; height: 40; radius: width / 2
         transform: Scale { origin.x: wheelHub.width / 2; origin.y: wheelHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
-        color: Qt.rgba(
-            Kirigami.Theme.backgroundColor.r * 0.3,
-            Kirigami.Theme.backgroundColor.g * 0.3,
-            Kirigami.Theme.backgroundColor.b * 0.3,
-            0.95 * root.bgOpacity)
-        border.width: 1
-        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.1 * root.bgOpacity)
+        // Gradient flattens to a solid disc when depth is 0
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.shade(Kirigami.Theme.backgroundColor, 0.3 * (1 + 1.2 * root.st.depth), 0.95 * root.bgOpacity) }
+            GradientStop { position: 1.0; color: root.shade(Kirigami.Theme.backgroundColor, 0.3, 0.95 * root.bgOpacity) }
+        }
+        border.width: root.st.idleGlow > 0 ? 1.5 : 1
+        border.color: root.st.idleGlow > 0
+            ? root.withAlpha(accentColor, 0.7 * root.bgOpacity)
+            : root.withAlpha(Kirigami.Theme.textColor, (0.1 + 0.08 * root.st.depth) * root.bgOpacity)
 
         Kirigami.Icon {
             anchors.centerIn: parent
@@ -515,10 +644,10 @@ Item {
                 id: wheelGlow
                 anchors.centerIn: parent
                 width: parent.width * 2.4; height: width
-                property real glowT: root.magnifyGlow(index)
-                opacity: glowT
+                opacity: root.haloOpacity(index)
+                visible: opacity > 0
+                onVisibleChanged: if (visible) requestPaint()
                 Behavior on opacity { NumberAnimation { duration: 160 * animScale; easing.type: Easing.OutCubic } }
-                onGlowTChanged: requestPaint()
                 Component.onCompleted: requestPaint()
                 onPaint: {
                     var ctx = getContext("2d")
@@ -572,6 +701,8 @@ Item {
         Behavior on spotA { enabled: semicircleBg.spotT > 0.5; NumberAnimation { duration: 160 * animScale; easing.type: Easing.OutCubic } }
         property real spotT: root.selectedIndex >= 0 ? 1 : 0
         Behavior on spotT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
+        property var sty: root.st
+        onStyChanged: requestPaint()
         onRotChanged: requestPaint()
         onOpChanged: requestPaint()
         onSpotAChanged: requestPaint()
@@ -580,20 +711,40 @@ Item {
         onPaint: {
             var ctx = getContext("2d")
             ctx.reset()
-            var cx = width / 2, cy = height / 2, r = width / 2
+            // 8px inset leaves room for the glass drop shadow
+            var cx = width / 2, cy = height / 2, r = width / 2 - 8
             var arc = Layouts.semicircleArc(rot)
+            var bg = Kirigami.Theme.backgroundColor
             ctx.beginPath()
             ctx.moveTo(cx, cy)
             ctx.arc(cx, cy, r, arc.start, arc.end)
             ctx.closePath()
 
+            // Base: side-to-side sweep plus a radial falloff (hub darker,
+            // rim lighter) whose strength follows depth
             var grad = ctx.createLinearGradient(
                 cx + Math.cos(arc.start) * r, cy + Math.sin(arc.start) * r,
                 cx + Math.cos(arc.end) * r, cy + Math.sin(arc.end) * r)
-            grad.addColorStop(0.0, Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, op))
-            grad.addColorStop(1.0, Qt.rgba(Kirigami.Theme.backgroundColor.r * 0.92, Kirigami.Theme.backgroundColor.g * 0.92, Kirigami.Theme.backgroundColor.b * 0.92, op * 0.95))
+            grad.addColorStop(0.0, root.shade(bg, 1, op))
+            grad.addColorStop(1.0, root.shade(bg, 1 - 0.08 * Math.max(sty.depth, 0.5), op * 0.95))
+            ctx.save()
+            if (sty.shadow) {
+                ctx.shadowColor = Qt.rgba(0, 0, 0, 0.35 * op)
+                ctx.shadowBlur = 10
+                ctx.shadowOffsetY = 2
+            }
             ctx.fillStyle = grad
             ctx.fill()
+            ctx.restore()
+
+            if (sty.depth > 0) {
+                var radial = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+                radial.addColorStop(0, Qt.rgba(0, 0, 0, 0.18 * sty.depth * op))
+                radial.addColorStop(0.6, Qt.rgba(0, 0, 0, 0))
+                radial.addColorStop(1, Qt.rgba(1, 1, 1, 0.06 * sty.depth * op))
+                ctx.fillStyle = radial
+                ctx.fill()
+            }
 
             // Soft accent spotlight behind the hovered/selected item, clipped
             // to the half-disk so it never bleeds past the arc edge
@@ -601,7 +752,7 @@ Item {
                 var spotX = cx + Math.cos(spotA) * r * 0.55
                 var spotY = cy + Math.sin(spotA) * r * 0.55
                 var spot = ctx.createRadialGradient(spotX, spotY, 0, spotX, spotY, r * 0.6)
-                spot.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.3 * op * spotT))
+                spot.addColorStop(0, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, Math.min(0.5, 0.3 * sty.glow) * op * spotT))
                 spot.addColorStop(1, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0))
                 ctx.save()
                 ctx.beginPath()
@@ -624,12 +775,13 @@ Item {
             for (var g = 0; g < rimPass.length; g++) {
                 ctx.beginPath()
                 ctx.arc(cx, cy, r - 1, arc.start, arc.end)
-                ctx.strokeStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, rimPass[g].a * op)
+                ctx.strokeStyle = Qt.rgba(accentColor.r, accentColor.g, accentColor.b, Math.min(1, rimPass[g].a * sty.rim * 1.6) * op)
                 ctx.lineWidth = rimPass[g].w
                 ctx.stroke()
             }
 
-            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.06 * op)
+            // Thin inner edge — brighter glossy line in glass
+            ctx.strokeStyle = Qt.rgba(1, 1, 1, (sty.highlight ? 0.14 : 0.06) * op)
             ctx.lineWidth = 1
             ctx.stroke()
         }
@@ -670,10 +822,9 @@ Item {
                     id: circGlow
                     anchors.centerIn: parent
                     width: parent.width * 1.8; height: width
-                    property real glowT: root.magnifyGlow(index)
-                    visible: glowT > 0
-                    opacity: glowT
-                    onGlowTChanged: requestPaint()
+                    opacity: root.haloOpacity(index)
+                    visible: opacity > 0
+                    onVisibleChanged: if (visible) requestPaint()
                     Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
                     onPaint: {
                         var ctx = getContext("2d")
@@ -698,17 +849,30 @@ Item {
                             position: 0.0
                             color: circItem.isSel
                                 ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.32 * root.bgOpacity)
-                                : Qt.rgba(Kirigami.Theme.backgroundColor.r * 1.15, Kirigami.Theme.backgroundColor.g * 1.15, Kirigami.Theme.backgroundColor.b * 1.15, 0.45 * root.bgOpacity)
+                                : root.shade(Kirigami.Theme.backgroundColor, 1 + 0.2 * root.st.depth, 0.45 * root.bgOpacity)
                         }
                         GradientStop {
                             position: 1.0
                             color: circItem.isSel
                                 ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.16 * root.bgOpacity)
-                                : Qt.rgba(Kirigami.Theme.backgroundColor.r * 0.85, Kirigami.Theme.backgroundColor.g * 0.85, Kirigami.Theme.backgroundColor.b * 0.85, 0.35 * root.bgOpacity)
+                                : root.shade(Kirigami.Theme.backgroundColor, 1 - 0.2 * root.st.depth, 0.4 * root.bgOpacity)
                         }
                     }
                     border.width: circItem.isSel ? 2 : 1
-                    border.color: circItem.isSel ? accentColor : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.16 * root.bgOpacity)
+                    border.color: circItem.isSel ? accentColor
+                        : root.st.idleGlow > 0 ? root.withAlpha(accentColor, 0.45 * root.bgOpacity)
+                        : root.withAlpha(Kirigami.Theme.textColor, (root.st.depth === 0 ? 0.1 : 0.16) * root.bgOpacity)
+
+                    // Glossy sheen over the top half
+                    Rectangle {
+                        visible: root.st.highlight
+                        anchors.fill: parent; anchors.margins: 2
+                        radius: width / 2
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.16 * root.bgOpacity) }
+                            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
+                        }
+                    }
                     Kirigami.Icon {
                         anchors.centerIn: parent
                         source: menuItems[index] ? menuItems[index].icon : ""
@@ -733,7 +897,7 @@ Item {
         property real op: root.bgOpacity
         onHovChanged: requestPaint()
         onOpChanged: requestPaint()
-        opacity: hov ? 1.0 : 0.55
+        opacity: Math.min(1, (hov ? 1.0 : 0.55) * (0.5 + 0.5 * root.st.glow))
         Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
         Component.onCompleted: requestPaint()
         onPaint: {
@@ -761,7 +925,7 @@ Item {
         transform: Scale { origin.x: semiHub.width / 2; origin.y: semiHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
         color: centerHovered ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.18 * bgOpacity) : Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.95 * bgOpacity)
         border.width: 2
-        border.color: centerHovered ? accentColor : Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.5 * bgOpacity)
+        border.color: centerHovered ? accentColor : root.withAlpha(accentColor, Math.min(1, 0.5 * (0.5 + 0.5 * root.st.rim) + root.st.idleGlow) * bgOpacity)
         Behavior on color { ColorAnimation { duration: 150 * animScale } }
         Kirigami.Icon {
             anchors.centerIn: parent; source: root.centerIcon
