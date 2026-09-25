@@ -7,7 +7,7 @@
 
   <group name="General">
     <entry name="menuItems" type="String">
-      <default>[{"label":"Terminal","icon":"utilities-terminal","desktop":"org.kde.konsole.desktop"},{"label":"Files","icon":"system-file-manager","desktop":"org.kde.dolphin.desktop"},{"label":"Browser","icon":"internet-web-browser","desktop":"firefox.desktop"},{"label":"Editor","icon":"accessories-text-editor","desktop":"org.kde.kate.desktop"},{"label":"Settings","icon":"preferences-system","desktop":"systemsettings.desktop"},{"label":"Music","icon":"applications-multimedia","desktop":"org.kde.elisa.desktop"}]</default>
+      <default>[{"label":"Terminal","icon":"utilities-terminal","desktop":"org.kde.konsole.desktop"},{"label":"Files","icon":"system-file-manager","desktop":"org.kde.dolphin.desktop"},{"label":"Browser","icon":"internet-web-browser","desktop":"firefox.desktop"},{"label":"Editor","icon":"accessories-text-editor","desktop":"org.kde.kate.desktop"},{"label":"Settings","icon":"preferences-system","desktop":"systemsettings.desktop"},{"label":"Software","icon":"plasma-discover","desktop":"org.kde.discover.desktop"}]</default>
     </entry>
     <entry name="menuSize" type="Int">
       <default>400</default>

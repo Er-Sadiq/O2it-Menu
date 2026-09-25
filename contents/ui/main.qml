@@ -9,6 +9,16 @@ PlasmoidItem {
     id: root
 
     Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground
+    // Makes the pre-existing per-widget global shortcut (bound via
+    // right-click → "Configure Shortcuts…", no registration code needed —
+    // every applet already has Plasma::Applet.globalShortcut) actually
+    // toggle this widget open/closed when triggered, instead of doing
+    // nothing. Note: this is a property of PlasmoidItem/AppletQuickItem
+    // itself (like `expanded` used elsewhere in this file), not a
+    // Plasmoid.* attached property — confirmed via the installed
+    // plasmoidplugin.qmltypes, where it's declared on
+    // PlasmaQuick::AppletQuickItem, not on the Plasmoid interface.
+    activationTogglesExpanded: true
 
     // ── Configuration ───────────────────────────────────────
     readonly property int cfgMenuSize: Plasmoid.configuration.menuSize
@@ -37,7 +47,25 @@ PlasmoidItem {
         engine: "executable"
         connectedSources: []
         onNewData: (sourceName, data) => { disconnectSource(sourceName) }
-        function exec(cmd) { if (cmd) connectSource(cmd) }
+        // kstart resolves apps via KService (the same mechanism Kicker's own
+        // AppEntry uses to launch), independent of the applications: KIO
+        // menu-category tree — see appentry.cpp's ApplicationLauncherJob.
+        // "kioclient exec applications:<id>" was tried previously and fails
+        // for almost every app ("Unknown application folder") because that
+        // KIO slave is organized by category folder, not by flat desktop-id.
+        function launch(desktopId) {
+            if (!desktopId) return
+            var id = desktopId.endsWith(".desktop") ? desktopId.slice(0, -".desktop".length) : desktopId
+            // Single-quote and escape any embedded single quotes — desktop
+            // ids are almost always [A-Za-z0-9.-_], but don't trust config
+            // JSON blindly since it can be hand-edited.
+            var safe = "'" + id.replace(/'/g, "'\\''") + "'"
+            // Bound with timeout: kstart can hang indefinitely on an
+            // unresolvable desktop id (confirmed — it never exits on its
+            // own), which would otherwise leave onNewData never firing and
+            // the source connected forever.
+            connectSource("timeout 15 kstart --application " + safe)
+        }
     }
 
     // ── Compact representation ──────────────────────────────
@@ -86,7 +114,7 @@ PlasmoidItem {
             centerGap: root.cfgCenterGap
 
             onLaunchApp: (desktopFile) => {
-                executable.exec("kioclient exec applications:" + desktopFile)
+                executable.launch(desktopFile)
                 root.expanded = false
             }
 
@@ -117,14 +145,26 @@ PlasmoidItem {
         }
     }
 
+    // Plasma 6 removed the old imperative Plasmoid.setAction()/action().
+    // triggered.connect() API (confirmed absent from the installed
+    // plasmoidplugin.qmltypes). Plasmoid.contextualActions below adds a
+    // context-menu entry ("Toggle Radial Menu") — it is NOT itself bindable
+    // to a global keyboard shortcut. The widget's actual global shortcut is
+    // Plasma::Applet's built-in `globalShortcut` property, which every
+    // applet already exposes via right-click → "Configure Shortcuts…" (or
+    // System Settings → Shortcuts → Plasma) with no registration code
+    // needed. That shortcut fires Applet::activated(), which toggles this
+    // widget open/closed only because of `activationTogglesExpanded: true`
+    // set above.
+    Plasmoid.contextualActions: [
+        PlasmaCore.Action {
+            text: i18n("Toggle Radial Menu")
+            icon.name: root.cfgPanelIcon || "view-grid"
+            onTriggered: root.expanded = !root.expanded
+        }
+    ]
+
     Component.onCompleted: {
-        // Registers a bindable action — set its global keyboard shortcut via
-        // right-click the widget → "Configure Shortcuts…" (or System Settings
-        // → Shortcuts → Plasma). Works whether requireShortcut is on or off.
-        Plasmoid.setAction("toggleRadialMenu", i18n("Toggle Radial Menu"), root.cfgPanelIcon || "view-grid")
-        Plasmoid.action("toggleRadialMenu").triggered.connect(function() {
-            root.expanded = !root.expanded
-        })
         if (!root.cfgRequireShortcut) root.expanded = true
     }
 }
