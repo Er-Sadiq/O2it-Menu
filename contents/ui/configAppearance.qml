@@ -15,7 +15,7 @@ KCM.SimpleKCM {
     property alias cfg_showLabels: showLabelsCheck.checked
     property alias cfg_showSectorLines: showSectorLinesCheck.checked
     property alias cfg_requireShortcut: requireShortcutCheck.checked
-    property alias cfg_semicircleRotation: semicircleRotationSlider.value
+    property int cfg_semicircleRotation
     property alias cfg_centerGap: centerGapSlider.value
     property string cfg_accentColorCustom
     property string cfg_panelIcon
@@ -79,19 +79,37 @@ KCM.SimpleKCM {
             }
         }
 
+        // Which way the arc faces, in 90° steps (stored as rotation degrees:
+        // 0 = up, 90 = right, 180 = down, 270 = left). Older configs with
+        // in-between angles highlight the nearest direction.
         RowLayout {
-            Kirigami.FormData.label: i18n("Semi-circle rotation:")
+            Kirigami.FormData.label: i18n("Semi-circle faces:")
             visible: cfg_menuLayout === "semicircle"
             spacing: Kirigami.Units.smallSpacing
-            QQC2.Slider {
-                id: semicircleRotationSlider
-                from: 0; to: 359; stepSize: 5
-                Layout.fillWidth: true
+            readonly property int current: ((Math.round(cfg_semicircleRotation / 90) % 4) + 4) % 4 * 90
+            Repeater {
+                model: [
+                    { deg: 0,   icon: "go-up",       text: i18n("Up") },
+                    { deg: 90,  icon: "go-next",     text: i18n("Right") },
+                    { deg: 180, icon: "go-down",     text: i18n("Down") },
+                    { deg: 270, icon: "go-previous", text: i18n("Left") }
+                ]
+                QQC2.Button {
+                    icon.name: modelData.icon
+                    text: modelData.text
+                    // Not checkable: clicking would break the checked binding
+                    checked: parent.current === modelData.deg
+                    onClicked: cfg_semicircleRotation = modelData.deg
+                }
             }
-            QQC2.Label {
-                text: Math.round(semicircleRotationSlider.value) + "°"
-                Layout.minimumWidth: Kirigami.Units.gridUnit * 3
-            }
+        }
+
+        QQC2.Label {
+            visible: cfg_menuLayout === "semicircle"
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            text: i18n("Pick Up for a bottom panel, Down for a top panel, Right for a left panel, Left for a right panel.")
         }
 
         Item { Kirigami.FormData.isSection: true }
