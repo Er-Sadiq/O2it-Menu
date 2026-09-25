@@ -16,7 +16,6 @@ Item {
     property var menuItems: []
     property int menuSize: 400
     property int cfgIconSize: 26
-    property int ringRadius: 140
     property real bgOpacity: 0.88
     property bool showLabels: true
     property bool showSectorLines: true
@@ -60,13 +59,33 @@ Item {
     width: menuSize; height: menuSize
     readonly property real centerX: width / 2
     readonly property real centerY: height / 2
-    readonly property int itemSize: 56
-    readonly property int centerSize: 60
     readonly property int itemCount: menuItems.length
+
+    // ── Responsive sizing ───────────────────────────────────
+    // menuSize is the single size knob; everything is tuned at 400 px and
+    // scales from there. Icon size and ring distance settings are "at 400".
+    readonly property real sizeScale: menuSize / 400
+    readonly property real ringRadius: menuSize * 0.35
+    readonly property int itemSize: Math.round(56 * sizeScale)
+    readonly property int centerSize: Math.round(60 * sizeScale)
+    readonly property int hubSize: Math.round(40 * sizeScale)
+    readonly property int hubIconSize: Math.round(20 * sizeScale)
+    readonly property int iconSize: Math.round(cfgIconSize * sizeScale)
+    readonly property real gapScaled: centerGap * sizeScale
+
+    // Largest ring radius that still keeps every item (and its background)
+    // inside the menuSize box, per layout
+    readonly property real maxRadius: {
+        var half = menuSize / 2
+        if (isWheel) return half - 20
+        if (isSemicircle) return (menuSize - itemSize - 30) / 2
+        var r = half - itemSize / 2 - 6
+        return itemCount > 6 ? r / 1.65 : r   // hex overflow ring sits at r * 1.65
+    }
 
     // Hub (center circle) size never moves with centerGap — only the item
     // ring does, so the slider purely controls the gap between them.
-    readonly property real effectiveRadius: ringRadius + centerGap
+    readonly property real effectiveRadius: Math.max(hubSize, Math.min(ringRadius + gapScaled, maxRadius))
 
     readonly property var itemPositions:
         Layouts.getPositions(menuLayout, itemCount,
@@ -87,7 +106,8 @@ Item {
     // user sees between the hub and the ring. wheelOuterR stays anchored to
     // effectiveRadius so the ring's own thickness never changes with the gap.
     readonly property real wheelInnerR: ringRadius * 0.44
-    readonly property real wheelSectorInnerR: wheelInnerR + centerGap
+    // Clamped so the ring always keeps at least ~one item of thickness
+    readonly property real wheelSectorInnerR: Math.min(wheelInnerR + gapScaled, wheelOuterR - itemSize * 0.9)
     readonly property real wheelOuterR: effectiveRadius + 10
 
     // ── State ───────────────────────────────────────────────
@@ -311,7 +331,7 @@ Item {
                 Kirigami.Icon {
                     anchors.centerIn: parent
                     source: menuItems[index] ? menuItems[index].icon : ""
-                    width: cfgIconSize; height: cfgIconSize
+                    width: root.iconSize; height: width
                     color: hexItem.isSel ? accentColor : Kirigami.Theme.textColor
                     Behavior on color { ColorAnimation { duration: 120 * animScale } }
                 }
@@ -324,7 +344,7 @@ Item {
         id: hexCenter
         visible: isHexagonal
         anchors.centerIn: parent
-        width: 40; height: 40
+        width: root.hubSize; height: root.hubSize
         transform: Scale { origin.x: hexCenter.width / 2; origin.y: hexCenter.height / 2; xScale: root.centerFxScale; yScale: xScale }
 
         // Outer glow ring
@@ -401,7 +421,7 @@ Item {
         Kirigami.Icon {
             anchors.centerIn: parent
             source: root.centerIcon
-            width: 20; height: 20
+            width: root.hubIconSize; height: width
             color: Kirigami.Theme.textColor
         }
     }
@@ -422,7 +442,7 @@ Item {
         // repaints this (larger) canvas
         property bool divLines: root.showSectorLines
         property real op: root.bgOpacity
-        property real gap: root.centerGap
+        property real gap: root.wheelSectorInnerR
         property var sty: root.st
         onDivLinesChanged: requestPaint()
         onOpChanged: requestPaint()
@@ -599,7 +619,7 @@ Item {
         id: wheelHub
         visible: isWheel
         anchors.centerIn: parent
-        width: 40; height: 40; radius: width / 2
+        width: root.hubSize; height: root.hubSize; radius: width / 2
         transform: Scale { origin.x: wheelHub.width / 2; origin.y: wheelHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
         // Gradient flattens to a solid disc when depth is 0
         gradient: Gradient {
@@ -614,7 +634,7 @@ Item {
         Kirigami.Icon {
             anchors.centerIn: parent
             source: root.centerIcon
-            width: 22; height: 22
+            width: Math.round(root.hubIconSize * 1.1); height: width
             color: root.centerHovered ? accentColor : Kirigami.Theme.textColor
             Behavior on color { ColorAnimation { duration: 120 * animScale } }
         }
@@ -677,7 +697,7 @@ Item {
                 Kirigami.Icon {
                     anchors.centerIn: parent
                     source: menuItems[index] ? menuItems[index].icon : ""
-                    width: cfgIconSize + 2; height: cfgIconSize + 2
+                    width: root.iconSize + 2; height: width
                     color: root.selectedIndex === index ? accentColor : Kirigami.Theme.textColor
                     Behavior on color { ColorAnimation { duration: 120 * animScale } }
                 }
@@ -705,7 +725,11 @@ Item {
         property real spotT: root.selectedIndex >= 0 ? 1 : 0
         Behavior on spotT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
         property var sty: root.st
+        property var pos: root.itemPositions
+        property bool divLines: root.showSectorLines
         onStyChanged: requestPaint()
+        onPosChanged: requestPaint()
+        onDivLinesChanged: requestPaint()
         onRotChanged: requestPaint()
         onOpChanged: requestPaint()
         onSpotAChanged: requestPaint()
@@ -747,6 +771,50 @@ Item {
                 radial.addColorStop(1, Qt.rgba(1, 1, 1, 0.06 * sty.depth * op))
                 ctx.fillStyle = radial
                 ctx.fill()
+            }
+
+            // Track band behind the item ring — a darker channel the items sit in
+            var neon = sty.idleGlow > 0
+            var trackIn = Math.max(root.hubSize / 2 + 6, root.effectiveRadius - root.itemSize / 2 - 6 * root.sizeScale)
+            var trackOut = r - 3
+            ctx.beginPath()
+            ctx.arc(cx, cy, trackOut, arc.start, arc.end)
+            ctx.arc(cx, cy, trackIn, arc.end, arc.start, true)
+            ctx.closePath()
+            ctx.fillStyle = Qt.rgba(0, 0, 0, (neon ? 0.28 : sty.depth > 0 ? 0.16 : 0.1) * op)
+            ctx.fill()
+            // Inner edge of the track
+            ctx.beginPath()
+            ctx.arc(cx, cy, trackIn, arc.start, arc.end)
+            ctx.strokeStyle = neon ? root.withAlpha(accentColor, 0.45 * op)
+                                   : Qt.rgba(1, 1, 1, Math.max(0.05, sty.sheen * 0.4) * op)
+            ctx.lineWidth = 1
+            ctx.stroke()
+
+            // Dividers between neighbouring items, like the wheel's sectors
+            if (divLines && pos.length > 1) {
+                for (var d = 0; d < pos.length - 1; d++) {
+                    var a = (pos[d].angle + pos[d + 1].angle) / 2
+                    var x1 = cx + Math.cos(a) * trackIn, y1 = cy + Math.sin(a) * trackIn
+                    var x2 = cx + Math.cos(a) * trackOut, y2 = cy + Math.sin(a) * trackOut
+                    ctx.beginPath()
+                    ctx.moveTo(x1, y1)
+                    ctx.lineTo(x2, y2)
+                    ctx.strokeStyle = neon ? root.withAlpha(accentColor, Math.min(1, 0.45 * sty.rim) * op)
+                                           : Qt.rgba(0, 0, 0, (sty.depth > 0 ? 0.4 : 0.25) * op)
+                    ctx.lineWidth = 2
+                    ctx.stroke()
+                    // Light hairline beside the dark one gives an etched look
+                    if (!neon) {
+                        var nx = -Math.sin(a), ny = Math.cos(a)
+                        ctx.beginPath()
+                        ctx.moveTo(x1 + nx, y1 + ny)
+                        ctx.lineTo(x2 + nx, y2 + ny)
+                        ctx.strokeStyle = Qt.rgba(1, 1, 1, (sty.sheen > 0 ? 0.12 : 0.05) * op)
+                        ctx.lineWidth = 1
+                        ctx.stroke()
+                    }
+                }
             }
 
             // Soft accent spotlight behind the hovered/selected item, clipped
@@ -879,7 +947,7 @@ Item {
                     Kirigami.Icon {
                         anchors.centerIn: parent
                         source: menuItems[index] ? menuItems[index].icon : ""
-                        width: cfgIconSize; height: cfgIconSize
+                        width: root.iconSize; height: width
                         color: circItem.isSel ? accentColor : Kirigami.Theme.textColor
                         Behavior on color { ColorAnimation { duration: 120 * animScale } }
                     }
@@ -924,7 +992,7 @@ Item {
         id: semiHub
         visible: isSemicircle
         anchors.centerIn: parent
-        width: 40; height: 40; radius: width / 2
+        width: root.hubSize; height: root.hubSize; radius: width / 2
         transform: Scale { origin.x: semiHub.width / 2; origin.y: semiHub.height / 2; xScale: root.centerFxScale; yScale: xScale }
         color: centerHovered ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.18 * bgOpacity) : Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.95 * bgOpacity)
         border.width: 2
@@ -932,7 +1000,7 @@ Item {
         Behavior on color { ColorAnimation { duration: 150 * animScale } }
         Kirigami.Icon {
             anchors.centerIn: parent; source: root.centerIcon
-            width: 18; height: 18
+            width: Math.round(root.hubIconSize * 0.9); height: width
             color: centerHovered ? accentColor : Kirigami.Theme.textColor
             Behavior on color { ColorAnimation { duration: 120 * animScale } }
         }
@@ -944,7 +1012,7 @@ Item {
     PlasmaComponents.Label {
         visible: showLabels
         anchors.horizontalCenter: parent.horizontalCenter
-        y: centerY + centerSize / 2 + 12
+        y: centerY + centerSize / 2 + 12 * sizeScale
         text: activeLabel
         font.weight: Font.Bold; font.pointSize: 11; font.letterSpacing: 0.5
         color: Kirigami.Theme.textColor

@@ -15,9 +15,6 @@
     <entry name="iconSize" type="Int">
       <default>26</default>
     </entry>
-    <entry name="ringRadius" type="Int">
-      <default>140</default>
-    </entry>
     <entry name="bgOpacity" type="Double">
       <default>0.88</default>
     </entry>

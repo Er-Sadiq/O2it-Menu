@@ -23,7 +23,6 @@ PlasmoidItem {
     // ── Configuration ───────────────────────────────────────
     readonly property int cfgMenuSize: Plasmoid.configuration.menuSize
     readonly property int cfgIconSize: Plasmoid.configuration.iconSize
-    readonly property int cfgRingRadius: Plasmoid.configuration.ringRadius
     readonly property real cfgBgOpacity: Plasmoid.configuration.bgOpacity
     readonly property bool cfgShowLabels: Plasmoid.configuration.showLabels
     readonly property bool cfgShowSectorLines: Plasmoid.configuration.showSectorLines
@@ -107,7 +106,6 @@ PlasmoidItem {
             menuItems: root.cfgItems
             menuSize: root.cfgMenuSize
             cfgIconSize: root.cfgIconSize
-            ringRadius: root.cfgRingRadius
             bgOpacity: root.cfgBgOpacity
             showLabels: root.cfgShowLabels
             showSectorLines: root.cfgShowSectorLines

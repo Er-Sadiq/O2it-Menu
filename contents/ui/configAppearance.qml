@@ -11,7 +11,6 @@ KCM.SimpleKCM {
 
     property alias cfg_menuSize: menuSizeSlider.value
     property alias cfg_iconSize: iconSizeSlider.value
-    property alias cfg_ringRadius: ringRadiusSlider.value
     property alias cfg_bgOpacity: bgOpacitySlider.value
     property alias cfg_showLabels: showLabelsCheck.checked
     property alias cfg_showSectorLines: showSectorLinesCheck.checked
@@ -164,25 +163,11 @@ KCM.SimpleKCM {
             spacing: Kirigami.Units.smallSpacing
             QQC2.Slider {
                 id: menuSizeSlider
-                from: 300; to: 600; stepSize: 10
+                from: 260; to: 640; stepSize: 10
                 Layout.fillWidth: true
             }
             QQC2.Label {
                 text: Math.round(menuSizeSlider.value) + " px"
-                Layout.minimumWidth: Kirigami.Units.gridUnit * 3
-            }
-        }
-
-        RowLayout {
-            Kirigami.FormData.label: i18n("Ring radius:")
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.Slider {
-                id: ringRadiusSlider
-                from: 80; to: 220; stepSize: 5
-                Layout.fillWidth: true
-            }
-            QQC2.Label {
-                text: Math.round(ringRadiusSlider.value) + " px"
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 3
             }
         }
@@ -199,6 +184,13 @@ KCM.SimpleKCM {
                 text: Math.round(centerGapSlider.value) + " px"
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 3
             }
+        }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            text: i18n("Ring, items, icons and spacing all scale with the menu size. Values below are at the default 400 px size.")
         }
 
         RowLayout {
