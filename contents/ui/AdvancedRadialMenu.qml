@@ -79,6 +79,10 @@ Item {
         var half = menuSize / 2
         if (isWheel) return half - 20
         if (isSemicircle) return (menuSize - itemSize - 30) / 2
+        if (isHud) {
+            var h = half - itemSize / 2 - 6
+            return itemCount > 8 ? h / 1.5 : h   // HUD overflow ring sits at r * 1.5
+        }
         var r = half - itemSize / 2 - 6
         return itemCount > 6 ? r / 1.65 : r   // hex overflow ring sits at r * 1.65
     }
@@ -99,6 +103,7 @@ Item {
     readonly property bool isHexagonal: menuLayout === "hexagonal" || menuLayout === "radial"
     readonly property bool isWheel: menuLayout === "wheel"
     readonly property bool isSemicircle: menuLayout === "semicircle"
+    readonly property bool isHud: menuLayout === "hud"
 
     // Wheel geometry — wheelInnerR is the hub/hole, fixed regardless of
     // centerGap. The pie sectors actually start at wheelSectorInnerR, which
@@ -1007,15 +1012,428 @@ Item {
     }
 
     // =====================================================================
+    //  HUD LAYOUT — Iron Man / JARVIS style: arc-reactor core, rotating
+    //  compass + segment rings, circular HUD buttons
+    // =====================================================================
+
+    readonly property real hudCoreR: Math.max(hubSize, effectiveRadius - itemSize / 2 - 8 * sizeScale)
+    readonly property real hudOrbR: hudCoreR * 0.42
+    // Ring spin is decorative — off in Minimal, and only while shown
+    readonly property bool hudSpin: isHud && st.pulseMin < 1
+
+    // Backdrop: thick translucent arc bands + thin frame circle, slow spin.
+    // Pure Item rotation, so spinning never repaints the canvas.
+    Canvas {
+        id: hudBackdrop
+        visible: isHud
+        anchors.centerIn: parent
+        width: root.menuSize; height: width
+        property var sty: root.st
+        property real op: root.bgOpacity
+        property color accent: accentColor
+        onStyChanged: requestPaint()
+        onOpChanged: requestPaint()
+        onAccentChanged: requestPaint()
+        Component.onCompleted: requestPaint()
+        RotationAnimation on rotation {
+            running: root.hudSpin; loops: Animation.Infinite
+            from: 0; to: 360; duration: 90000
+            onStopped: hudBackdrop.rotation = 0
+        }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var cx = width / 2, cy = height / 2
+            var R = width / 2 - 4
+            var band = 14 * root.sizeScale
+            var d2r = Math.PI / 180
+            // [start°, length°] — deliberately uneven, like the reference
+            var bands = [[-80, 70], [8, 42], [70, 95], [188, 28], [232, 62]]
+            for (var i = 0; i < bands.length; i++) {
+                var a0 = bands[i][0] * d2r, a1 = (bands[i][0] + bands[i][1]) * d2r
+                ctx.beginPath()
+                ctx.arc(cx, cy, R, a0, a1)
+                ctx.arc(cx, cy, R - band, a1, a0, true)
+                ctx.closePath()
+                ctx.fillStyle = root.withAlpha(accent, (0.08 + 0.1 * sty.idleGlow + 0.04 * sty.depth) * op)
+                ctx.fill()
+                ctx.strokeStyle = root.withAlpha(accent, (0.18 + 0.2 * sty.idleGlow) * op)
+                ctx.lineWidth = 1
+                ctx.stroke()
+            }
+            ctx.beginPath()
+            ctx.arc(cx, cy, R - band - 6 * root.sizeScale, 0, 2 * Math.PI)
+            ctx.strokeStyle = root.withAlpha(accent, (0.2 + 0.2 * sty.idleGlow) * op)
+            ctx.lineWidth = 1
+            ctx.stroke()
+        }
+    }
+
+    // Compass ring just outside the item orbit: ticks, N/E/S/W, markers.
+    // Counter-rotates slower than the backdrop.
+    Canvas {
+        id: hudCompass
+        visible: isHud
+        anchors.centerIn: parent
+        width: root.menuSize + 40; height: width
+        property var sty: root.st
+        property real op: root.bgOpacity
+        // Outermost button orbit, so the compass never runs under buttons
+        property real orbit: root.effectiveRadius * (root.itemCount > 8 ? 1.5 : 1)
+        property color accent: accentColor
+        onStyChanged: requestPaint()
+        onOpChanged: requestPaint()
+        onOrbitChanged: requestPaint()
+        onAccentChanged: requestPaint()
+        Component.onCompleted: requestPaint()
+        RotationAnimation on rotation {
+            running: root.hudSpin; loops: Animation.Infinite
+            from: 360; to: 0; duration: 140000
+            onStopped: hudCompass.rotation = 0
+        }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var cx = width / 2, cy = height / 2
+            var k = root.sizeScale
+            var r0 = orbit + root.itemSize / 2 + 4 * k
+            var a = Math.min(1, 0.55 + 0.3 * sty.idleGlow) * op
+
+            // Orbit line through the item centers + dashed inner guide
+            ctx.beginPath()
+            ctx.arc(cx, cy, orbit, 0, 2 * Math.PI)
+            ctx.strokeStyle = root.withAlpha(accent, 0.45 * a)
+            ctx.lineWidth = 1
+            ctx.stroke()
+            var inner = orbit - root.itemSize / 2 - 3 * k
+            for (var s = 0; s < 72; s += 2) {
+                ctx.beginPath()
+                ctx.arc(cx, cy, inner, s * Math.PI / 36, (s + 1) * Math.PI / 36)
+                ctx.strokeStyle = root.withAlpha(accent, 0.35 * a)
+                ctx.stroke()
+            }
+
+            // Ticks every 5°, long every 30°
+            for (var t = 0; t < 72; t++) {
+                var ang = t * Math.PI / 36
+                var major = t % 6 === 0
+                var len = (major ? 9 : 4) * k
+                ctx.beginPath()
+                ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0)
+                ctx.lineTo(cx + Math.cos(ang) * (r0 + len), cy + Math.sin(ang) * (r0 + len))
+                ctx.strokeStyle = root.withAlpha(accent, (major ? 0.8 : 0.4) * a)
+                ctx.lineWidth = major ? 1.5 : 1
+                ctx.stroke()
+            }
+
+            // Cardinal letters + inward-pointing markers
+            var letters = ["N", "E", "S", "W"]
+            ctx.font = "bold " + Math.round(10 * k) + "px sans-serif"
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            for (var c = 0; c < 4; c++) {
+                var ca = c * Math.PI / 2 - Math.PI / 2 + Math.PI / 12
+                var lr = r0 + 17 * k
+                ctx.fillStyle = root.withAlpha(accent, 0.75 * a)
+                ctx.fillText(letters[c], cx + Math.cos(ca) * lr, cy + Math.sin(ca) * lr)
+
+                var ma = c * Math.PI / 2 - Math.PI / 2
+                var tip = r0 - 1 * k, base = r0 + 8 * k, w = 0.035
+                ctx.beginPath()
+                ctx.moveTo(cx + Math.cos(ma) * tip, cy + Math.sin(ma) * tip)
+                ctx.lineTo(cx + Math.cos(ma - w) * base, cy + Math.sin(ma - w) * base)
+                ctx.lineTo(cx + Math.cos(ma + w) * base, cy + Math.sin(ma + w) * base)
+                ctx.closePath()
+                ctx.fillStyle = root.withAlpha(accent, 0.85 * a)
+                ctx.fill()
+            }
+        }
+    }
+
+    // Arc-reactor core: dark disc, segment-block ring, rim, hex-patterned orb
+    Item {
+        id: hudCore
+        visible: isHud
+        anchors.centerIn: parent
+        width: root.hudCoreR * 2 + 24; height: width
+
+        Canvas {
+            id: hudCoreCanvas
+            anchors.fill: parent
+            property var sty: root.st
+            property real op: root.bgOpacity
+            property real coreR: root.hudCoreR
+            property bool hov: root.centerHovered
+            property color accent: accentColor
+            onStyChanged: requestPaint()
+            onOpChanged: requestPaint()
+            onCoreRChanged: requestPaint()
+            onHovChanged: requestPaint()
+            onAccentChanged: requestPaint()
+            Component.onCompleted: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                var cx = width / 2, cy = height / 2
+                var R = coreR, orbR = root.hudOrbR
+                var bg = Kirigami.Theme.backgroundColor
+
+                // Dark disc with a faint accent edge tint
+                var disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, R)
+                disc.addColorStop(0, root.shade(bg, 0.35 * sty.body, 0.85 * op))
+                disc.addColorStop(0.8, root.shade(bg, 0.45 * sty.body, 0.8 * op))
+                disc.addColorStop(1, root.withAlpha(accent, (0.15 + 0.15 * sty.idleGlow) * op))
+                ctx.save()
+                if (sty.shadow) {
+                    ctx.shadowColor = Qt.rgba(0, 0, 0, 0.4 * op)
+                    ctx.shadowBlur = 10
+                }
+                ctx.beginPath()
+                ctx.arc(cx, cy, R, 0, 2 * Math.PI)
+                ctx.fillStyle = disc
+                ctx.fill()
+                ctx.restore()
+
+                // Segment blocks — ~2/3 lit, the rest dim, like a charge gauge
+                var nb = 36, bIn = R * 0.68, bOut = R * 0.9
+                var slot = 2 * Math.PI / nb
+                for (var b = 0; b < nb; b++) {
+                    var s0 = b * slot - Math.PI / 2 + slot * 0.15
+                    var s1 = s0 + slot * 0.7
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, bOut, s0, s1)
+                    ctx.arc(cx, cy, bIn, s1, s0, true)
+                    ctx.closePath()
+                    var lit = b < nb * 0.66
+                    ctx.fillStyle = root.withAlpha(accent, (lit ? 0.35 + 0.3 * sty.idleGlow : 0.1) * op)
+                    ctx.fill()
+                }
+
+                // Rim — glow passes in neon
+                var rim = sty.idleGlow > 0 ? [{ w: 8, a: 0.12 }, { w: 4, a: 0.25 }, { w: 1.5, a: 0.95 }]
+                                           : [{ w: 1.5, a: Math.min(1, 0.7 * sty.rim + 0.2) }]
+                for (var g = 0; g < rim.length; g++) {
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, R, 0, 2 * Math.PI)
+                    ctx.strokeStyle = root.withAlpha(accent, rim[g].a * op)
+                    ctx.lineWidth = rim[g].w
+                    ctx.stroke()
+                }
+
+                // Orb: lit from upper-left, accent-tinted, brighter on hover
+                var hx = cx - orbR * 0.35, hy = cy - orbR * 0.35
+                var orb = ctx.createRadialGradient(hx, hy, 0, cx, cy, orbR)
+                var boost = hov ? 1.3 : 1.0
+                orb.addColorStop(0, root.withAlpha(accent, Math.min(1, 0.55 * boost) * op))
+                orb.addColorStop(0.55, root.shade(accent, 0.35, 0.85 * op))
+                orb.addColorStop(1, root.shade(bg, 0.25, 0.95 * op))
+                ctx.beginPath()
+                ctx.arc(cx, cy, orbR, 0, 2 * Math.PI)
+                ctx.fillStyle = orb
+                ctx.fill()
+
+                // Hex armor pattern clipped to the orb
+                ctx.save()
+                ctx.beginPath()
+                ctx.arc(cx, cy, orbR - 1, 0, 2 * Math.PI)
+                ctx.clip()
+                var hr = Math.max(4, orbR * 0.22)
+                var dx = hr * Math.sqrt(3), dy = hr * 1.5
+                for (var row = -4; row <= 4; row++) {
+                    for (var col = -4; col <= 4; col++) {
+                        var px = cx + col * dx + (row % 2 ? dx / 2 : 0)
+                        var py = cy + row * dy
+                        var dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
+                        if (dist > orbR + hr) continue
+                        Layouts.hexPath(ctx, px, py, hr * 0.86)
+                        ctx.strokeStyle = root.withAlpha(accent, (0.25 + 0.35 * (1 - dist / orbR)) * boost * op)
+                        ctx.lineWidth = 1
+                        ctx.stroke()
+                    }
+                }
+                ctx.restore()
+
+                ctx.beginPath()
+                ctx.arc(cx, cy, orbR, 0, 2 * Math.PI)
+                ctx.strokeStyle = root.withAlpha(accent, (hov ? 0.95 : 0.6) * op)
+                ctx.lineWidth = 1.5
+                ctx.stroke()
+            }
+        }
+
+        // Sweep: bright arc with a fading tail, orbiting the block ring
+        Canvas {
+            id: hudSweep
+            anchors.fill: parent
+            visible: root.st.glow > 0
+            property real coreR: root.hudCoreR
+            property color accent: accentColor
+            onCoreRChanged: requestPaint()
+            onAccentChanged: requestPaint()
+            Component.onCompleted: requestPaint()
+            RotationAnimation on rotation {
+                running: root.hudSpin; loops: Animation.Infinite
+                from: 0; to: 360; duration: 6000
+            }
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                var cx = width / 2, cy = height / 2, r = coreR * 0.95
+                var steps = 14, span = Math.PI * 0.45
+                for (var i = 0; i < steps; i++) {
+                    var t = i / steps
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, r, -Math.PI / 2 + span * t, -Math.PI / 2 + span * (t + 1 / steps) + 0.01)
+                    ctx.strokeStyle = root.withAlpha(accent, 0.9 * t * root.bgOpacity)
+                    ctx.lineWidth = 3
+                    ctx.stroke()
+                }
+            }
+        }
+
+        transform: Scale { origin.x: hudCore.width / 2; origin.y: hudCore.height / 2; xScale: root.centerFxScale; yScale: xScale }
+
+        Kirigami.Icon {
+            anchors.centerIn: parent
+            source: root.centerIcon
+            width: root.hubIconSize; height: width
+            color: root.centerHovered ? accentColor : Kirigami.Theme.textColor
+            Behavior on color { ColorAnimation { duration: 120 * animScale } }
+        }
+    }
+
+    // HUD buttons: dark disc, double accent outline, targeting brackets on hover
+    Repeater {
+        model: isHud ? itemCount : 0
+        Item {
+            id: hudItem
+            width: root.itemSize; height: root.itemSize
+            readonly property bool isSel: root.selectedIndex === index
+            readonly property var pos: index < itemPositions.length ? itemPositions[index] : null
+            x: pos ? pos.x - width / 2 : 0
+            y: pos ? pos.y - height / 2 : 0
+            transform: Scale { origin.x: hudItem.width / 2; origin.y: hudItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
+
+            opacity: 0; scale: 0.4
+            Component.onCompleted: hudEnter.start()
+            SequentialAnimation {
+                id: hudEnter
+                PauseAnimation { duration: 45 * index * animScale }
+                ParallelAnimation {
+                    NumberAnimation { target: hudItem; property: "opacity"; to: 1; duration: 200 * animScale; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: hudItem; property: "scale"; to: 1.0; duration: 300 * animScale; easing.type: Easing.OutBack }
+                }
+            }
+
+            Item {
+                anchors.fill: parent
+                scale: root.magnifyScale(index)
+                opacity: root.fxOpacity(index)
+                Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
+
+                Canvas {
+                    anchors.centerIn: parent
+                    width: parent.width * 1.8; height: width
+                    opacity: root.haloOpacity(index)
+                    visible: opacity > 0
+                    onVisibleChanged: if (visible) requestPaint()
+                    Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
+                    Component.onCompleted: requestPaint()
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset()
+                        var cx = width / 2, cy = height / 2, r = width / 2
+                        var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+                        grad.addColorStop(0, root.withAlpha(accentColor, 0.5))
+                        grad.addColorStop(0.5, root.withAlpha(accentColor, 0.16))
+                        grad.addColorStop(1, root.withAlpha(accentColor, 0))
+                        ctx.fillStyle = grad
+                        ctx.beginPath()
+                        ctx.arc(cx, cy, r, 0, 2 * Math.PI)
+                        ctx.fill()
+                    }
+                }
+
+                Rectangle {
+                    anchors.fill: parent; radius: width / 2
+                    color: hudItem.isSel
+                        ? root.withAlpha(accentColor, 0.28 * root.bgOpacity)
+                        : root.shade(Kirigami.Theme.backgroundColor, 0.4 * root.st.body, 0.75 * root.bgOpacity)
+                    border.width: hudItem.isSel ? 2 : 1.5
+                    border.color: root.withAlpha(accentColor,
+                        (hudItem.isSel ? 1 : Math.min(1, 0.45 + 0.4 * root.st.idleGlow + 0.1 * root.st.rim)) * root.bgOpacity)
+                    Behavior on color { ColorAnimation { duration: 120 * animScale } }
+
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: Math.round(4 * root.sizeScale)
+                        radius: width / 2
+                        color: "transparent"
+                        border.width: 1
+                        border.color: root.withAlpha(accentColor, (0.2 + 0.2 * root.st.idleGlow) * root.bgOpacity)
+                    }
+                    Rectangle {
+                        visible: root.st.sheen > 0
+                        anchors.fill: parent; anchors.margins: 2
+                        radius: width / 2
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, root.st.sheen * 0.8 * root.bgOpacity) }
+                            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
+                        }
+                    }
+                    Kirigami.Icon {
+                        anchors.centerIn: parent
+                        source: menuItems[index] ? menuItems[index].icon : ""
+                        width: root.iconSize; height: width
+                        color: hudItem.isSel || root.st.idleGlow > 0 ? accentColor : Kirigami.Theme.textColor
+                        Behavior on color { ColorAnimation { duration: 120 * animScale } }
+                    }
+                }
+
+                // Targeting brackets — four short arcs that lock on and spin
+                Canvas {
+                    id: hudBrackets
+                    anchors.centerIn: parent
+                    width: parent.width + 16 * root.sizeScale; height: width
+                    opacity: hudItem.isSel ? 1 : 0
+                    visible: opacity > 0
+                    scale: hudItem.isSel ? 1 : 1.3
+                    Behavior on opacity { NumberAnimation { duration: 140 * animScale } }
+                    Behavior on scale { NumberAnimation { duration: 180 * animScale; easing.type: Easing.OutCubic } }
+                    onVisibleChanged: if (visible) requestPaint()
+                    Component.onCompleted: requestPaint()
+                    RotationAnimation on rotation {
+                        running: hudItem.isSel && root.hudSpin; loops: Animation.Infinite
+                        from: 0; to: 360; duration: 4000
+                    }
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset()
+                        var cx = width / 2, cy = height / 2, r = width / 2 - 2
+                        for (var q = 0; q < 4; q++) {
+                            var a0 = q * Math.PI / 2 - Math.PI / 4 - 0.3
+                            ctx.beginPath()
+                            ctx.arc(cx, cy, r, a0, a0 + 0.6)
+                            ctx.strokeStyle = root.withAlpha(accentColor, 0.95)
+                            ctx.lineWidth = 2
+                            ctx.stroke()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =====================================================================
     //  LABEL
     // =====================================================================
     PlasmaComponents.Label {
         visible: showLabels
         anchors.horizontalCenter: parent.horizontalCenter
-        y: centerY + centerSize / 2 + 12 * sizeScale
-        text: activeLabel
-        font.weight: Font.Bold; font.pointSize: 11; font.letterSpacing: 0.5
-        color: Kirigami.Theme.textColor
+        // HUD: uppercase accent readout tucked under the orb
+        y: isHud ? centerY + hudOrbR + 4 * sizeScale : centerY + centerSize / 2 + 12 * sizeScale
+        text: isHud ? activeLabel.toUpperCase() : activeLabel
+        font.weight: Font.Bold; font.pointSize: isHud ? 9 : 11; font.letterSpacing: isHud ? 2 : 0.5
+        color: isHud ? accentColor : Kirigami.Theme.textColor
         opacity: activeLabel !== "" ? 1.0 : 0.0
         scale: activeLabel !== "" ? 1.0 : 0.85
         Behavior on opacity { NumberAnimation { duration: 100 * animScale } }
@@ -1058,7 +1476,7 @@ Item {
             var dx = mouse.x - centerX, dy = mouse.y - centerY
             var dist = Math.sqrt(dx * dx + dy * dy)
 
-            var centerR = isWheel ? wheelInnerR - 4 : centerSize / 2
+            var centerR = isWheel ? wheelInnerR - 4 : isHud ? hudOrbR : centerSize / 2
             if (dist < centerR) {
                 centerHovered = true; selectedIndex = -1; activeLabel = "Settings"
             } else if (isWheel && dist < wheelSectorInnerR) {

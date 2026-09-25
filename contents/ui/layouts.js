@@ -5,6 +5,7 @@ function getPositions(layout, n, radius, cx, cy, rotationDeg, innerRadius, itemS
     switch (layout) {
         case "semicircle": return semicircle(n, radius, cx, cy, rotationDeg || 0, itemSize || 0)
         case "wheel":      return wheel(n, radius, innerRadius, cx, cy)
+        case "hud":        return hud(n, radius, cx, cy)
         // "radial" was this layout's old id before it was renamed to
         // "hexagonal" — old saved configs with that value fall through here.
         default:           return hexagonal(n, radius, cx, cy)
@@ -56,6 +57,24 @@ function semicircle(n, r, cx, cy, rotationDeg, itemSize) {
     for (var i = 0; i < n; i++) {
         var a = (n === 1) ? (start + end) / 2 : start + (end - start) / (n - 1) * i
         pos.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, angle: a })
+    }
+    return pos
+}
+
+// HUD: up to 8 buttons evenly on one orbit starting at the top; extras
+// fan onto an outer orbit at r*1.5, offset by half an inner slot so they
+// sit between (not behind) the inner buttons.
+function hud(n, r, cx, cy) {
+    var pos = []
+    var first = Math.min(n, 8)
+    for (var i = 0; i < first; i++) {
+        var a = (2 * Math.PI / first) * i - Math.PI / 2
+        pos.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, angle: a })
+    }
+    var rest = Math.min(n - first, 16)
+    for (var j = 0; j < rest; j++) {
+        var a2 = (2 * Math.PI / rest) * j - Math.PI / 2 + Math.PI / first
+        pos.push({ x: cx + Math.cos(a2) * r * 1.5, y: cy + Math.sin(a2) * r * 1.5, angle: a2 })
     }
     return pos
 }

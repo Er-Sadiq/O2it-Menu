@@ -24,11 +24,12 @@ KCM.SimpleKCM {
     property string cfg_menuStyle
 
     // Layout options — two parallel arrays (same pattern as colorpicker)
-    readonly property var layoutValues: ["hexagonal", "wheel", "semicircle"]
+    readonly property var layoutValues: ["hexagonal", "wheel", "semicircle", "hud"]
     readonly property var layoutLabels: [
         i18n("Hexagonal (Hex Icons)"),
         i18n("Wheel (Pie Sectors)"),
-        i18n("Semi-Circle (Arc)")
+        i18n("Semi-Circle (Arc)"),
+        i18n("HUD (Iron Man)")
     ]
 
     readonly property var styleValues: ["glass", "neon", "minimal"]
