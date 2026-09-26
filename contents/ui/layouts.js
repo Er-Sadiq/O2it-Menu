@@ -37,7 +37,7 @@ function hexagonal(n, r, cx, cy) {
         var a = (2 * Math.PI / 6) * i - Math.PI / 2
         pos.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, angle: a })
     }
-    var ring2 = Math.min(n - 6, 12)
+    var ring2 = n - 6
     var r2 = r * 1.65
     for (var j = 0; j < ring2; j++) {
         var a2 = (2 * Math.PI / ring2) * j - Math.PI / 2 + Math.PI / ring2
@@ -71,7 +71,7 @@ function hud(n, r, cx, cy) {
         var a = (2 * Math.PI / first) * i - Math.PI / 2
         pos.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, angle: a })
     }
-    var rest = Math.min(n - first, 16)
+    var rest = n - first
     for (var j = 0; j < rest; j++) {
         var a2 = (2 * Math.PI / rest) * j - Math.PI / 2 + Math.PI / first
         pos.push({ x: cx + Math.cos(a2) * r * 1.5, y: cy + Math.sin(a2) * r * 1.5, angle: a2 })
@@ -91,14 +91,6 @@ function wheel(n, outerR, innerR, cx, cy) {
         pos.push({ x: cx + Math.cos(a) * midR, y: cy + Math.sin(a) * midR, angle: a })
     }
     return pos
-}
-
-function hasSectors(layout) {
-    return false  // sectors now drawn differently per layout
-}
-
-function hasDividers(layout) {
-    return false  // dividers drawn via Canvas per layout
 }
 
 // Point on a pointy-top hexagon's perimeter. t runs 0…6 around the edges

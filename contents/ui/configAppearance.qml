@@ -74,7 +74,8 @@ KCM.SimpleKCM {
             id: layoutCombo
             Kirigami.FormData.label: i18n("Menu layout:")
             model: appearanceRoot.layoutLabels
-            currentIndex: appearanceRoot.layoutValues.indexOf(cfg_menuLayout)
+            // Old "radial" (and unknown values) fall back to hexagonal, index 0
+            currentIndex: Math.max(0, appearanceRoot.layoutValues.indexOf(cfg_menuLayout))
             onActivated: index => {
                 cfg_menuLayout = appearanceRoot.layoutValues[index]
             }
@@ -107,8 +108,9 @@ KCM.SimpleKCM {
                 QQC2.Button {
                     icon.name: modelData.icon
                     text: modelData.text
-                    // Not checkable: clicking would break the checked binding
-                    checked: parent.current === modelData.deg
+                    // `down`, not `checked`: setting checked makes the button
+                    // checkable, and clicking it would then un-toggle it
+                    down: parent.current === modelData.deg
                     onClicked: cfg_semicircleRotation = modelData.deg
                 }
             }
@@ -142,7 +144,8 @@ KCM.SimpleKCM {
             Kirigami.FormData.label: i18n("Shortcut:")
             visible: requireShortcutCheck.checked
             keySequence: Plasmoid.globalShortcut
-            patterns: KQuickControls.ShortcutPattern.Modifier | KQuickControls.ShortcutPattern.ModifierAndKey
+            // Not `patterns`: that needs KDE Frameworks 6.16+ and breaks the whole page on older ones
+            modifierOnlyAllowed: true
             onKeySequenceModified: appearanceRoot.unsavedChanges = keySequence !== Plasmoid.globalShortcut
         }
 
@@ -150,7 +153,7 @@ KCM.SimpleKCM {
             Layout.fillWidth: true
             visible: requireShortcutCheck.checked
             type: Kirigami.MessageType.Information
-            text: i18n("Set a shortcut above, then hold it: the menu appears in the middle of the screen. Point at an app and let go to launch it, or let go anywhere else to close. Press it again or Esc to close.")
+            text: i18n("Set a shortcut above, then hold it: the menu appears in the middle of the screen. Point at an app and let go to launch it, or let go anywhere else to close. Press Esc or click elsewhere to close.")
         }
 
         Kirigami.InlineMessage {
@@ -201,7 +204,7 @@ KCM.SimpleKCM {
             spacing: Kirigami.Units.smallSpacing
             QQC2.Slider {
                 id: menuSizeSlider
-                from: 260; to: 640; stepSize: 10
+                from: 260; to: 640; stepSize: 10; snapMode: QQC2.Slider.SnapAlways
                 Layout.fillWidth: true
             }
             QQC2.Label {
@@ -215,7 +218,7 @@ KCM.SimpleKCM {
             spacing: Kirigami.Units.smallSpacing
             QQC2.Slider {
                 id: centerGapSlider
-                from: -40; to: 150; stepSize: 5
+                from: -40; to: 150; stepSize: 5; snapMode: QQC2.Slider.SnapAlways
                 Layout.fillWidth: true
             }
             QQC2.Label {
@@ -236,7 +239,7 @@ KCM.SimpleKCM {
             spacing: Kirigami.Units.smallSpacing
             QQC2.Slider {
                 id: iconSizeSlider
-                from: 18; to: 48; stepSize: 2
+                from: 18; to: 48; stepSize: 2; snapMode: QQC2.Slider.SnapAlways
                 Layout.fillWidth: true
             }
             QQC2.Label {
@@ -259,7 +262,7 @@ KCM.SimpleKCM {
             spacing: Kirigami.Units.smallSpacing
             QQC2.Slider {
                 id: bgOpacitySlider
-                from: 0.0; to: 1.0; stepSize: 0.05
+                from: 0.0; to: 1.0; stepSize: 0.05; snapMode: QQC2.Slider.SnapAlways
                 Layout.fillWidth: true
             }
             QQC2.Label {

@@ -20,12 +20,11 @@ Item {
         property bool spin: false
         property color color: "white"
         property int sides: 0
-        property real animScale: 1
         opacity: active ? 1 : 0
         visible: opacity > 0
         scale: active ? 1 : 1.3
-        Behavior on opacity { NumberAnimation { duration: 140 * tb.animScale } }
-        Behavior on scale { NumberAnimation { duration: 180 * tb.animScale; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 140 } }
+        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
         onVisibleChanged: if (visible) requestPaint()
         onColorChanged: requestPaint()
         Component.onCompleted: requestPaint()
@@ -65,6 +64,65 @@ Item {
         }
     }
 
+    // Hover glow behind an item: a soft radial blob, or a flat hex (hex: true).
+    // Inline components can't see root, so the caller passes vivid.
+    component Halo: Canvas {
+        id: halo
+        property color color: "white"
+        property real vivid: 1
+        property bool hex: false
+        property real inner: 0.5      // alpha at the center
+        property real mid: 0.18       // alpha at midStop
+        property real midStop: 0.5
+        anchors.centerIn: parent
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        onVisibleChanged: if (visible) requestPaint()
+        onColorChanged: requestPaint()
+        Component.onCompleted: requestPaint()
+        function tint(a) { return Qt.rgba(color.r, color.g, color.b, Math.min(1, a * vivid)) }
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var cx = width / 2, cy = height / 2, r = width / 2
+            if (hex) {
+                Layouts.hexPath(ctx, cx, cy, r - 1)
+                ctx.fillStyle = tint(0.35)
+            } else {
+                var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+                grad.addColorStop(0, tint(inner))
+                grad.addColorStop(midStop, tint(mid))
+                grad.addColorStop(1, tint(0))
+                ctx.fillStyle = grad
+                ctx.beginPath()
+                ctx.arc(cx, cy, r, 0, 2 * Math.PI)
+            }
+            ctx.fill()
+        }
+    }
+
+    // Staggered pop-in for one item; replays each time trigger changes
+    // (root.openCount), since the dialog keeps items alive between opens.
+    component Entrance: SequentialAnimation {
+        id: ent
+        property Item item
+        property int trigger: 0
+        property int delay: 0
+        property real fromScale: 0.4
+        property int fadeDuration: 200
+        property int scaleDuration: 300
+        property real overshoot: 1.70158
+        onTriggerChanged: restart()
+        Component.onCompleted: start()
+        PropertyAction { target: ent.item; property: "opacity"; value: 0 }
+        PropertyAction { target: ent.item; property: "scale"; value: ent.fromScale }
+        PauseAnimation { duration: ent.delay }
+        ParallelAnimation {
+            NumberAnimation { target: ent.item; property: "opacity"; to: 1; duration: ent.fadeDuration; easing.type: Easing.OutCubic }
+            NumberAnimation { target: ent.item; property: "scale"; to: 1.0; duration: ent.scaleDuration; easing.type: Easing.OutBack; easing.overshoot: ent.overshoot }
+        }
+    }
+
     // ── Config ──────────────────────────────────────────────
     property var menuItems: []
     property int menuSize: 400
@@ -73,8 +131,6 @@ Item {
     property bool showLabels: true
     property bool showSectorLines: true
     property color accentColor: Kirigami.Theme.highlightColor
-    // Fixed timing multiplier — durations below are tuned at 1.0
-    readonly property real animScale: 1.0
     property string centerIcon: "configure"
     property string menuLayout: "hexagonal"
     property int semicircleRotation: 0
@@ -91,11 +147,11 @@ Item {
     //   edge      — idle outline alpha (non-neon)
     //   sheen     — glossy top-edge highlight alpha (0 = off)
     //   shadow    — soft drop shadow under shapes
-    //   pulseMin  — center pulse low point (1 = no pulse)
+    //   spin      — decorative HUD rings rotate
     readonly property var styles: ({
-        glass:   { glow: 0.9, idleGlow: 0, rim: 0.7, depth: 1.0, body: 1.7, edge: 0.4,  sheen: 0.28, shadow: true,  pulseMin: 0.8 },
-        neon:    { glow: 1.6, idleGlow: 1, rim: 1.4, depth: 0.3, body: 0.4, edge: 0,    sheen: 0,    shadow: false, pulseMin: 0.45 },
-        minimal: { glow: 0,   idleGlow: 0, rim: 0.3, depth: 0,   body: 1.0, edge: 0.18, sheen: 0,    shadow: false, pulseMin: 1.0 }
+        glass:   { glow: 0.9, idleGlow: 0, rim: 0.7, depth: 1.0, body: 1.7, edge: 0.4,  sheen: 0.28, shadow: true,  spin: true },
+        neon:    { glow: 1.6, idleGlow: 1, rim: 1.4, depth: 0.3, body: 0.4, edge: 0,    sheen: 0,    shadow: false, spin: true },
+        minimal: { glow: 0,   idleGlow: 0, rim: 0.3, depth: 0,   body: 1.0, edge: 0.18, sheen: 0,    shadow: false, spin: false }
     })
     readonly property var st: styles[menuStyle] || styles.glass
 
@@ -219,10 +275,11 @@ Item {
     property bool pressedCenter: false
     property bool pressing: false
     property real pressT: pressing ? 1 : 0
-    Behavior on pressT { NumberAnimation { duration: 90 * animScale; easing.type: Easing.OutCubic } }
+    Behavior on pressT { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
     property int launchIndex: -1
     property real popT: 0
     readonly property bool launching: launchIndex >= 0
+    property int openCount: 0
 
     function show() {
         launchAnim.stop()
@@ -230,6 +287,7 @@ Item {
         pressedIndex = -1; pressedCenter = false; pressing = false
         launchIndex = -1; popT = 0
         openAnim.restart()
+        openCount++
     }
 
     function startLaunch(idx) {
@@ -274,20 +332,20 @@ Item {
     // ── Animations ──────────────────────────────────────────
     ParallelAnimation {
         id: openAnim
-        NumberAnimation { target: root; property: "opacity"; from: 0; to: 1; duration: 250 * animScale; easing.type: Easing.OutCubic }
-        NumberAnimation { target: root; property: "scale"; from: 0.6; to: 1.0; duration: 380 * animScale; easing.type: Easing.OutBack; easing.overshoot: 1.2 }
+        NumberAnimation { target: root; property: "opacity"; from: 0; to: 1; duration: 250; easing.type: Easing.OutCubic }
+        NumberAnimation { target: root; property: "scale"; from: 0.6; to: 1.0; duration: 380; easing.type: Easing.OutBack; easing.overshoot: 1.2 }
     }
     SequentialAnimation {
         id: closeAnim
         ParallelAnimation {
-            NumberAnimation { target: root; property: "opacity"; to: 0; duration: 150 * animScale; easing.type: Easing.InCubic }
-            NumberAnimation { target: root; property: "scale"; to: 0.7; duration: 150 * animScale; easing.type: Easing.InCubic }
+            NumberAnimation { target: root; property: "opacity"; to: 0; duration: 150; easing.type: Easing.InCubic }
+            NumberAnimation { target: root; property: "scale"; to: 0.7; duration: 150; easing.type: Easing.InCubic }
         }
         ScriptAction { script: root.closeRequested() }
     }
     SequentialAnimation {
         id: launchAnim
-        NumberAnimation { target: root; property: "popT"; from: 0; to: 1; duration: 180 * animScale; easing.type: Easing.OutCubic }
+        NumberAnimation { target: root; property: "popT"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
         ScriptAction {
             script: {
                 var item = menuItems[root.launchIndex]
@@ -316,14 +374,9 @@ Item {
             transform: Scale { origin.x: hexItem.width / 2; origin.y: hexItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.3
-            Component.onCompleted: hexEnter.start()
-            SequentialAnimation {
-                id: hexEnter
-                PauseAnimation { duration: 55 * index * animScale }
-                ParallelAnimation {
-                    NumberAnimation { target: hexItem; property: "opacity"; to: 1; duration: 220 * animScale; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: hexItem; property: "scale"; to: 1.0; duration: 320 * animScale; easing.type: Easing.OutBack; easing.overshoot: 1.4 }
-                }
+            Entrance {
+                item: hexItem; trigger: root.openCount
+                delay: 55 * index; fromScale: 0.3; fadeDuration: 220; scaleDuration: 320; overshoot: 1.4
             }
 
             // Inner wrap owns hover-scale (outer hexItem.scale is driven by entrance anim)
@@ -332,25 +385,14 @@ Item {
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
                 opacity: root.fxOpacity(index)
-                Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
                 // Hex glow behind (on hover, falls off across neighbors)
-                Canvas {
-                    id: hexGlow
-                    anchors.centerIn: parent
+                Halo {
+                    hex: true
                     width: parent.width + 18; height: width
+                    color: accentColor; vivid: root.vivid
                     opacity: root.haloOpacity(index)
-                    visible: opacity > 0
-                    onVisibleChanged: if (visible) requestPaint()
-                    Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.reset()
-                        Layouts.hexPath(ctx, width/2, height/2, width/2 - 1)
-                        ctx.fillStyle = root.withAlpha(accentColor, 0.35)
-                        ctx.fill()
-                    }
-                    Component.onCompleted: requestPaint()
                 }
 
                 // Hex container shape
@@ -362,9 +404,11 @@ Item {
                     // 0 → 1 blend between idle and selected look, animated so
                     // fill/border cross-fade instead of snapping
                     property real selT: hexItem.isSel ? 1 : 0
-                    Behavior on selT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
+                    Behavior on selT { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
                     property real op: root.bgOpacity
                     property var sty: root.st
+                    property color accent: accentColor
+                    onAccentChanged: requestPaint()
                     onSelTChanged: requestPaint()
                     onOpChanged: requestPaint()
                     onStyChanged: requestPaint()
@@ -433,7 +477,7 @@ Item {
                     source: menuItems[index] ? menuItems[index].icon : ""
                     width: root.iconSize; height: width
                     color: hexItem.isSel ? accentColor : Kirigami.Theme.textColor
-                    Behavior on color { ColorAnimation { duration: 120 * animScale } }
+                    Behavior on color { ColorAnimation { duration: 120 } }
                 }
 
                 TargetBrackets {
@@ -442,7 +486,6 @@ Item {
                     sides: 6
                     active: hexItem.isSel
                     color: accentColor
-                    animScale: root.animScale
                 }
             }
         }
@@ -466,6 +509,10 @@ Item {
         property real op: root.bgOpacity
         property real gap: root.wheelSectorInnerR
         property var sty: root.st
+        property int n: itemCount
+        property color accent: accentColor
+        onNChanged: requestPaint()
+        onAccentChanged: requestPaint()
         onDivLinesChanged: requestPaint()
         onOpChanged: requestPaint()
         onGapChanged: requestPaint()
@@ -577,10 +624,10 @@ Item {
         // straight to the hovered sector instead of sweeping in from the last one
         Behavior on rotation {
             enabled: wheelHighlight.opacity > 0.5
-            RotationAnimation { duration: 160 * animScale; direction: RotationAnimation.Shortest; easing.type: Easing.OutCubic }
+            RotationAnimation { duration: 160; direction: RotationAnimation.Shortest; easing.type: Easing.OutCubic }
         }
         opacity: root.selectedIndex >= 0 ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
         property int n: itemCount
         property real op: root.bgOpacity
@@ -658,7 +705,7 @@ Item {
             source: root.centerIcon
             width: Math.round(root.hubIconSize * 1.1); height: width
             color: root.centerHovered ? accentColor : Kirigami.Theme.textColor
-            Behavior on color { ColorAnimation { duration: 120 * animScale } }
+            Behavior on color { ColorAnimation { duration: 120 } }
         }
     }
 
@@ -674,39 +721,17 @@ Item {
             transform: Scale { origin.x: wheelItem.width / 2; origin.y: wheelItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.3
-            Component.onCompleted: wheelEnterAnim.start()
-            SequentialAnimation {
-                id: wheelEnterAnim
-                PauseAnimation { duration: 40 * index * animScale }
-                ParallelAnimation {
-                    NumberAnimation { target: wheelItem; property: "opacity"; to: 1; duration: 200 * animScale; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: wheelItem; property: "scale"; to: 1.0; duration: 280 * animScale; easing.type: Easing.OutBack }
-                }
+            Entrance {
+                item: wheelItem; trigger: root.openCount
+                delay: 40 * index; fromScale: 0.3; fadeDuration: 200; scaleDuration: 280
             }
 
             // Neon glow halo behind icon — brighter on hovered item, faint on ring-neighbors
-            Canvas {
-                id: wheelGlow
-                anchors.centerIn: parent
+            Halo {
                 width: parent.width * 2.4; height: width
+                inner: 0.55; mid: 0.2; midStop: 0.45
+                color: accentColor; vivid: root.vivid
                 opacity: root.haloOpacity(index)
-                visible: opacity > 0
-                onVisibleChanged: if (visible) requestPaint()
-                Behavior on opacity { NumberAnimation { duration: 160 * animScale; easing.type: Easing.OutCubic } }
-                Component.onCompleted: requestPaint()
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.reset()
-                    var cx = width / 2, cy = height / 2, r = width / 2
-                    var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-                    grad.addColorStop(0, root.withAlpha(accentColor, 0.55))
-                    grad.addColorStop(0.45, root.withAlpha(accentColor, 0.2))
-                    grad.addColorStop(1, root.withAlpha(accentColor, 0))
-                    ctx.fillStyle = grad
-                    ctx.beginPath()
-                    ctx.arc(cx, cy, r, 0, 2 * Math.PI)
-                    ctx.fill()
-                }
             }
 
             Item {
@@ -714,14 +739,14 @@ Item {
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
                 opacity: root.fxOpacity(index)
-                Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
                 Kirigami.Icon {
                     anchors.centerIn: parent
                     source: menuItems[index] ? menuItems[index].icon : ""
                     width: root.iconSize + 2; height: width
                     color: root.selectedIndex === index ? accentColor : Kirigami.Theme.textColor
-                    Behavior on color { ColorAnimation { duration: 120 * animScale } }
+                    Behavior on color { ColorAnimation { duration: 120 } }
                 }
             }
         }
@@ -743,12 +768,14 @@ Item {
         // Spotlight slides between items (spotA) and fades in/out (spotT);
         // the slide is skipped while faded out so it appears in place
         property real spotA: root.lastSelected < itemPositions.length ? itemPositions[root.lastSelected].angle : 0
-        Behavior on spotA { enabled: semicircleBg.spotT > 0.5; NumberAnimation { duration: 160 * animScale; easing.type: Easing.OutCubic } }
+        Behavior on spotA { enabled: semicircleBg.spotT > 0.5; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
         property real spotT: root.selectedIndex >= 0 ? 1 : 0
-        Behavior on spotT { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
+        Behavior on spotT { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
         property var sty: root.st
         property var pos: root.itemPositions
         property bool divLines: root.showSectorLines
+        property color accent: accentColor
+        onAccentChanged: requestPaint()
         onStyChanged: requestPaint()
         onPosChanged: requestPaint()
         onDivLinesChanged: requestPaint()
@@ -893,46 +920,22 @@ Item {
             transform: Scale { origin.x: circItem.width / 2; origin.y: circItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.4
-            Component.onCompleted: circEnter.start()
-            SequentialAnimation {
-                id: circEnter
-                PauseAnimation { duration: 50 * index * animScale }
-                ParallelAnimation {
-                    NumberAnimation { target: circItem; property: "opacity"; to: 1; duration: 200 * animScale; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: circItem; property: "scale"; to: 1.0; duration: 300 * animScale; easing.type: Easing.OutBack }
-                }
+            Entrance {
+                item: circItem; trigger: root.openCount
+                delay: 50 * index; fromScale: 0.4; fadeDuration: 200; scaleDuration: 300
             }
 
             Item {
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
                 opacity: root.fxOpacity(index)
-                Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
-                // Hover glow halo (matches hexGlow/wheelGlow — was missing
-                // here, so semicircle had pop-scale but no glow)
-                Canvas {
-                    id: circGlow
-                    anchors.centerIn: parent
+                // Hover glow halo
+                Halo {
                     width: parent.width * 1.8; height: width
+                    color: accentColor; vivid: root.vivid
                     opacity: root.haloOpacity(index)
-                    visible: opacity > 0
-                    onVisibleChanged: if (visible) requestPaint()
-                    Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.reset()
-                        var cx = width / 2, cy = height / 2, r = width / 2
-                        var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-                        grad.addColorStop(0, root.withAlpha(accentColor, 0.5))
-                        grad.addColorStop(0.5, root.withAlpha(accentColor, 0.18))
-                        grad.addColorStop(1, root.withAlpha(accentColor, 0))
-                        ctx.fillStyle = grad
-                        ctx.beginPath()
-                        ctx.arc(cx, cy, r, 0, 2 * Math.PI)
-                        ctx.fill()
-                    }
-                    Component.onCompleted: requestPaint()
                 }
 
                 Rectangle {
@@ -980,7 +983,7 @@ Item {
                         source: menuItems[index] ? menuItems[index].icon : ""
                         width: root.iconSize; height: width
                         color: circItem.isSel ? accentColor : Kirigami.Theme.textColor
-                        Behavior on color { ColorAnimation { duration: 120 * animScale } }
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
 
                     TargetBrackets {
@@ -989,7 +992,6 @@ Item {
                         active: circItem.isSel
                         spin: root.hudSpin
                         color: accentColor
-                        animScale: root.animScale
                     }
                 }
             }
@@ -1009,7 +1011,8 @@ Item {
         : Math.max(hubSize, effectiveRadius - itemSize / 2 - (isHud ? 8 : 16) * sizeScale)
     readonly property real hudOrbR: hudCoreR * (isSemicircle ? 0.55 : 0.42)
     // Ring spin is decorative — off in Minimal, and only while shown
-    readonly property bool hudSpin: hudLook && st.pulseMin < 1
+    // (the panel dialog keeps the menu loaded while hidden)
+    readonly property bool hudSpin: hudLook && st.spin && Window.visibility !== Window.Hidden
     // Hexagonal's rotating frame: inradius just outside the outermost items,
     // so the flat sides clear every item at any rotation
     readonly property real hexFrameIn: effectiveRadius * (itemCount > 6 ? 1.65 : 1) + itemSize / 2 + 4 * sizeScale
@@ -1376,7 +1379,7 @@ Item {
             source: root.centerIcon
             width: root.hubIconSize; height: width
             color: root.centerHovered ? accentColor : Kirigami.Theme.textColor
-            Behavior on color { ColorAnimation { duration: 120 * animScale } }
+            Behavior on color { ColorAnimation { duration: 120 } }
         }
     }
 
@@ -1393,43 +1396,21 @@ Item {
             transform: Scale { origin.x: hudItem.width / 2; origin.y: hudItem.height / 2; xScale: root.fxScale(index); yScale: xScale }
 
             opacity: 0; scale: 0.4
-            Component.onCompleted: hudEnter.start()
-            SequentialAnimation {
-                id: hudEnter
-                PauseAnimation { duration: 45 * index * animScale }
-                ParallelAnimation {
-                    NumberAnimation { target: hudItem; property: "opacity"; to: 1; duration: 200 * animScale; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: hudItem; property: "scale"; to: 1.0; duration: 300 * animScale; easing.type: Easing.OutBack }
-                }
+            Entrance {
+                item: hudItem; trigger: root.openCount
+                delay: 45 * index; fromScale: 0.4; fadeDuration: 200; scaleDuration: 300
             }
 
             Item {
                 anchors.fill: parent
                 scale: root.magnifyScale(index)
                 opacity: root.fxOpacity(index)
-                Behavior on scale { NumberAnimation { duration: 200 * animScale; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
-                Canvas {
-                    anchors.centerIn: parent
+                Halo {
                     width: parent.width * 1.8; height: width
+                    color: accentColor; vivid: root.vivid
                     opacity: root.haloOpacity(index)
-                    visible: opacity > 0
-                    onVisibleChanged: if (visible) requestPaint()
-                    Behavior on opacity { NumberAnimation { duration: 150 * animScale } }
-                    Component.onCompleted: requestPaint()
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.reset()
-                        var cx = width / 2, cy = height / 2, r = width / 2
-                        var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-                        grad.addColorStop(0, root.withAlpha(accentColor, 0.5))
-                        grad.addColorStop(0.5, root.withAlpha(accentColor, 0.16))
-                        grad.addColorStop(1, root.withAlpha(accentColor, 0))
-                        ctx.fillStyle = grad
-                        ctx.beginPath()
-                        ctx.arc(cx, cy, r, 0, 2 * Math.PI)
-                        ctx.fill()
-                    }
                 }
 
                 Rectangle {
@@ -1440,7 +1421,7 @@ Item {
                     border.width: hudItem.isSel ? 2 : 1.5
                     border.color: root.withAlpha(accentColor,
                         (hudItem.isSel ? 1 : Math.min(1, 0.45 + 0.4 * root.st.idleGlow + 0.1 * root.st.rim)) * root.bgOpacity)
-                    Behavior on color { ColorAnimation { duration: 120 * animScale } }
+                    Behavior on color { ColorAnimation { duration: 120 } }
 
                     Rectangle {
                         anchors.fill: parent; anchors.margins: Math.round(4 * root.sizeScale)
@@ -1463,7 +1444,7 @@ Item {
                         source: menuItems[index] ? menuItems[index].icon : ""
                         width: root.iconSize; height: width
                         color: hudItem.isSel || root.st.idleGlow > 0 ? accentColor : Kirigami.Theme.textColor
-                        Behavior on color { ColorAnimation { duration: 120 * animScale } }
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
                 }
 
@@ -1473,7 +1454,6 @@ Item {
                     active: hudItem.isSel
                     spin: root.hudSpin
                     color: accentColor
-                    animScale: root.animScale
                 }
             }
         }
@@ -1494,8 +1474,8 @@ Item {
         color: hudLook ? accentColor : Kirigami.Theme.textColor
         opacity: activeLabel !== "" ? 1.0 : 0.0
         scale: activeLabel !== "" ? 1.0 : 0.85
-        Behavior on opacity { NumberAnimation { duration: 100 * animScale } }
-        Behavior on scale { NumberAnimation { duration: 140 * animScale; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 100 } }
+        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
         PlasmaComponents.Label {
             anchors.centerIn: parent; anchors.verticalCenterOffset: 1; anchors.horizontalCenterOffset: 1
             text: parent.text; font: parent.font; color: Qt.rgba(0, 0, 0, 0.25); z: -1

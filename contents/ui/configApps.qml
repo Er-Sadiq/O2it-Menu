@@ -15,7 +15,6 @@ KCM.SimpleKCM {
     ListModel { id: listModel }
 
     property bool loading: false
-    property int forceUpdate: 0
 
     Component.onCompleted: loadFromConfig()
     onCfg_menuItemsChanged: {
@@ -32,7 +31,6 @@ KCM.SimpleKCM {
             }
         } catch (e) {}
         loading = false
-        forceUpdate++
     }
 
     function saveToConfig() {

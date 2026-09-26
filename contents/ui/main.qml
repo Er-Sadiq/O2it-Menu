@@ -44,6 +44,10 @@ PlasmoidItem {
     readonly property bool inPanel: Plasmoid.formFactor === PlasmaCore.Types.Horizontal
                                  || Plasmoid.formFactor === PlasmaCore.Types.Vertical
     readonly property bool alwaysVisible: !inPanel && !cfgRequireShortcut
+    // Panel and hold-to-show open the menu in our own dialog. On the desktop
+    // the widget then shows just its icon, so there's never a second menu.
+    readonly property bool useDialog: inPanel || cfgRequireShortcut
+    preferredRepresentation: useDialog ? compactRepresentation : null
 
     readonly property var cfgItems: {
         try { return JSON.parse(Plasmoid.configuration.menuItems) }
@@ -188,7 +192,7 @@ PlasmoidItem {
         mainItem: Loader {
             id: dialogLoader
             focus: true
-            active: root.inPanel || root.cfgRequireShortcut
+            active: root.useDialog
             sourceComponent: menuComponent
         }
         onVisibleChanged: {
@@ -201,7 +205,7 @@ PlasmoidItem {
     property bool holdOpen: false
 
     function toggleMenu() {
-        if (inPanel) {
+        if (useDialog) {
             if (panelMenu.visible) { closeMenu(); return }
             panelMenu.visualParent = root.compactRepresentationItem
             panelMenu.location = Plasmoid.location
@@ -216,10 +220,11 @@ PlasmoidItem {
     }
 
     // Shortcut pressed in hold-to-show mode: centered on the screen, with
-    // keyboard focus so the key release reaches the menu. Pressing again
-    // closes it — a fallback for sessions where the release is swallowed.
+    // keyboard focus so the key release reaches the menu. While held, key
+    // repeat re-fires the shortcut; ignore those instead of toggling. If the
+    // release is swallowed, Esc or clicking away still closes it.
     function openHold() {
-        if (panelMenu.visible) { closeMenu(); return }
+        if (panelMenu.visible) { if (!holdOpen) closeMenu(); return }
         holdOpen = true
         panelMenu.visualParent = null
         panelMenu.location = PlasmaCore.Types.Floating
